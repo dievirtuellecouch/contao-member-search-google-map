@@ -1,0 +1,17 @@
+<?php
+// Minimal info window template for list markers (expects $this->it)
+$it = $this->it ?? null;
+if (!$it) return;
+?>
+<div class="cm-info">
+  <strong><?= htmlspecialchars($it['company'] ?: trim(($it['firstname']?:'').' '.($it['lastname']?:'')), ENT_QUOTES, 'UTF-8') ?></strong><br>
+  <?php if (!empty($it['street'])): ?><?= htmlspecialchars($it['street'], ENT_QUOTES, 'UTF-8') ?><br><?php endif; ?>
+  <?php if (!empty($it['postal']) || !empty($it['city'])): ?>
+    <?= htmlspecialchars(trim(($it['postal']?:'').' '.($it['city']?:'')), ENT_QUOTES, 'UTF-8') ?>
+  <?php endif; ?>
+  <?php if (!empty($it['website'])): ?><br>
+    <?php $url = preg_match('~^https?://~', (string)$it['website']) ? (string)$it['website'] : ('http://'.$it['website']); ?>
+    <a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="nofollow noopener">Website</a>
+  <?php endif; ?>
+</div>
+

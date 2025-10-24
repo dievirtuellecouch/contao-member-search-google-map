@@ -1,0 +1,162 @@
+<div class="mod_member_googlemaps_list">
+  <form class="cm-search" action="<?= $this->action ?>" method="get">
+    <label for="plz">PLZ</label>
+    <input type="text" name="plz" id="plz" value="<?= $this->plz ?>" pattern="[0-9]{3,5}" />
+    <label for="country">Land</label>
+    <input type="text" name="country" id="country" value="<?= $this->country ?>" maxlength="2" placeholder="DE" />
+    <button type="submit">Suchen</button>
+  </form>
+
+  <?php if ($this->includeMap && ($this->mapPosition ?? 'bottom') === 'top'): ?>
+    <?php
+      // CSP allowances for Google Maps and nonce for inline scripts
+      $this->addCspSource(['script-src','img-src','style-src','connect-src'], 'https://maps.googleapis.com');
+      $this->addCspSource(['script-src','img-src','style-src','connect-src'], 'https://maps.gstatic.com');
+      $this->addCspSource('script-src', 'https://www.google.com');
+      $this->addCspSource('style-src', "'unsafe-inline'");
+      $this->addCspSource('img-src', 'data:');
+      $nonce = $this->nonce('script-src');
+      // Normalize height (value/unit) in case of serialized DCA value
+      $heightCss = '400px';
+      $h = $this->mapHeight ?? '';
+      if (is_array($h)) {
+          $val = (string)($h['value'] ?? ''); $unit = (string)($h['unit'] ?? 'px');
+          if ($val !== '') { $heightCss = $val.(preg_match('~^\d+$~',$val)?$unit:''); }
+      } else {
+          $hs = trim((string)$h);
+          if ($hs !== '') {
+              if (preg_match('~^a:\\d+:{~', $hs)) {
+                  try { $arr = \Contao\StringUtil::deserialize($hs, true); if (is_array($arr)) { $val=(string)($arr['value']??''); $unit=(string)($arr['unit']??'px'); if ($val!=='') { $heightCss = $val.(preg_match('~^\\d+$~',$val)?$unit:''); } } } catch (\Throwable $e) {}
+              } else { $heightCss = $hs; }
+          }
+      }
+    ?>
+    <div id="cm-map" style="width:100%;height:<?= htmlspecialchars($heightCss, ENT_QUOTES, 'UTF-8') ?>;"></div>
+    <script<?= $nonce ? ' nonce="'.$nonce.'"' : '' ?>>
+      (function(){
+        var items = <?= json_encode($this->items, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
+        var points = [];
+        for (var i=0;i<items.length;i++){
+          if (!items[i].coords) continue;
+          var parts = items[i].coords.split(',');
+          if (parts.length < 2) continue;
+          var lat = parseFloat(parts[0]);
+          var lng = parseFloat(parts[1]);
+          if (isNaN(lat) || isNaN(lng)) continue;
+          points.push({lat: lat, lng: lng, title: items[i].company || items[i].name});
+        }
+        var center = points[0] || null;
+        <?php if (!empty($this->mapShowOnEmpty) && !empty($this->mapCenterEmpty)): ?>
+        if (!center) {
+          var c = '<?= addslashes($this->mapCenterEmpty) ?>'.split(',');
+          if (c.length>=2) center = {lat: parseFloat(c[0]), lng: parseFloat(c[1])};
+        }
+        <?php endif; ?>
+        if (!center) return;
+        var apiKey = '<?= htmlspecialchars((string)($this->googleApiKey ?? ''), ENT_QUOTES, 'UTF-8') ?>';
+        var cb = '__cmInit_simple_<?= (int)($this->id ?? 0) ?>_top';
+        window[cb] = function(){
+          if (!window.google || !google.maps) return;
+          var map = new google.maps.Map(document.getElementById('cm-map'), {zoom: <?= (int)($this->mapZoomEmpty ?: 7) ?>, center: center});
+          points.forEach(function(p){ new google.maps.Marker({position: p, map: map, title: p.title}); });
+        };
+        var s = document.createElement('script');
+        s.src = 'https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(apiKey)+'&libraries=marker&v=weekly&loading=async&callback='+cb;
+        s.async = true; s.defer = true; document.body.appendChild(s);
+      })();
+    </script>
+  <?php endif; ?>
+  <?php if ($this->hasResults): ?>
+    <table class="cm-results">
+      <thead>
+        <tr>
+          <?php foreach (($this->displayFields ?: []) as $f): ?>
+            <?php $lab = $GLOBALS['TL_DCA']['tl_member']['fields'][$f]['label'][0] ?? ucfirst($f); ?>
+            <th><?= htmlspecialchars($lab, ENT_QUOTES, 'UTF-8') ?></th>
+          <?php endforeach; ?>
+          <?php if (!empty($this->linkRoute)): ?>
+            <th>Route</th>
+          <?php endif; ?>
+        </tr>
+      </thead>
+      <tbody>
+        <?php foreach ($this->items as $it): ?>
+          <tr>
+            <?php foreach (($this->displayFields ?: []) as $f): ?>
+              <td>
+                <?php $val = $it[$f] ?? ''; ?>
+                <?php if ($f === 'website' && $val && $this->linkWebsite): ?>
+                  <a href="<?= preg_match('~^https?://~', $val) ? $val : ('http://'.$val) ?>" rel="nofollow noopener" target="_blank">Website</a>
+                <?php else: ?>
+                  <?= htmlspecialchars((string) $val, ENT_QUOTES, 'UTF-8') ?>
+                <?php endif; ?>
+              </td>
+            <?php endforeach; ?>
+            <?php if (!empty($this->linkRoute)): ?>
+              <td>
+                <?php if (!empty($it['routeUrl'])): ?>
+                  <a href="<?= htmlspecialchars($it['routeUrl'], ENT_QUOTES, 'UTF-8') ?>" rel="nofollow noopener" target="_blank">Route planen</a>
+                <?php endif; ?>
+              </td>
+            <?php endif; ?>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  <?php else: ?>
+    <p><?= htmlspecialchars($this->notFoundMessage, ENT_QUOTES, 'UTF-8') ?></p>
+  <?php endif; ?>
+
+  <?php if ($this->includeMap && ($this->mapPosition ?? 'bottom') !== 'top'): ?>
+    <?php
+      // CSP allowances for Google Maps and nonce for inline scripts
+      $this->addCspSource(['script-src','img-src','style-src','connect-src'], 'https://maps.googleapis.com');
+      $this->addCspSource(['script-src','img-src','style-src','connect-src'], 'https://maps.gstatic.com');
+      $this->addCspSource('script-src', 'https://www.google.com');
+      $this->addCspSource('style-src', "'unsafe-inline'");
+      $this->addCspSource('img-src', 'data:');
+      $nonce = $this->nonce('script-src');
+      // Normalize height
+      $heightCss = '400px';
+      $h = $this->mapHeight ?? '';
+      if (is_array($h)) {
+          $val = (string)($h['value'] ?? ''); $unit = (string)($h['unit'] ?? 'px');
+          if ($val !== '') { $heightCss = $val.(preg_match('~^\d+$~',$val)?$unit:''); }
+      } else {
+          $hs = trim((string)$h);
+          if ($hs !== '') {
+              if (preg_match('~^a:\\d+:{~', $hs)) {
+                  try { $arr = \Contao\StringUtil::deserialize($hs, true); if (is_array($arr)) { $val=(string)($arr['value']??''); $unit=(string)($arr['unit']??'px'); if ($val!=='') { $heightCss = $val.(preg_match('~^\\d+$~',$val)?$unit:''); } } } catch (\Throwable $e) {}
+              } else { $heightCss = $hs; }
+          }
+      }
+    ?>
+    <div id="cm-map" style="width:100%;height:<?= htmlspecialchars($heightCss, ENT_QUOTES, 'UTF-8') ?>;"></div>
+    <script<?= $nonce ? ' nonce="'.$nonce.'"' : '' ?>>
+      (function(){
+        var items = <?= json_encode($this->items, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
+        var points = [];
+        for (var i=0;i<items.length;i++){
+          if (!items[i].coords) continue;
+          var parts = items[i].coords.split(',');
+          if (parts.length < 2) continue;
+          var lat = parseFloat(parts[0]);
+          var lng = parseFloat(parts[1]);
+          if (isNaN(lat) || isNaN(lng)) continue;
+          points.push({lat: lat, lng: lng, title: items[i].company || items[i].name});
+        }
+        if (!points.length) return;
+        var apiKey = '<?= htmlspecialchars((string)($this->googleApiKey ?? ''), ENT_QUOTES, 'UTF-8') ?>';
+        var cb = '__cmInit_simple_<?= (int)($this->id ?? 0) ?>_bot';
+        window[cb] = function(){
+          if (!window.google || !google.maps) return;
+          var map = new google.maps.Map(document.getElementById('cm-map'), {zoom: 7, center: points[0]});
+          points.forEach(function(p){ new google.maps.Marker({position: p, map: map, title: p.title}); });
+        };
+        var s = document.createElement('script');
+        s.src = 'https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(apiKey)+'&libraries=marker&v=weekly&loading=async&callback='+cb;
+        s.async = true; s.defer = true; document.body.appendChild(s);
+      })();
+    </script>
+  <?php endif; ?>
+</div>

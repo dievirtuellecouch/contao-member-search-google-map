@@ -1,0 +1,60 @@
+<?php $this->extend('block_unsearchable'); ?>
+
+<?php if (!empty($this->invalid)): ?>
+  <p>Eintrag nicht gefunden.</p>
+<?php else: $it = $this->item; ?>
+  <div class="mod_member_reader">
+    <h1><?= $this->escapeHtml($it['company'] ?: trim(($it['firstname']? $it['firstname'].' ' : '').$it['lastname'])) ?></h1>
+    <p>
+      <?php if ($it['street']): ?><?= $this->escapeHtml($it['street']) ?><br><?php endif; ?>
+      <?= $this->escapeHtml($it['postal']) ?> <?= $this->escapeHtml($it['city']) ?>
+    </p>
+    <ul>
+      <?php if ($it['phone']): ?><li>Tel: <?= $this->escapeHtml($it['phone']) ?></li><?php endif; ?>
+      <?php if ($it['email']): ?><li>E-Mail: <a href="mailto:<?= $this->escapeHtml($it['email']) ?>"><?= $this->escapeHtml($it['email']) ?></a></li><?php endif; ?>
+      <?php if ($it['website']): ?><li>Website: <a href="<?= preg_match('~^https?://~', $it['website']) ? $it['website'] : ('http://'.$it['website']) ?>" target="_blank" rel="nofollow noopener"><?= $this->escapeHtml($it['website']) ?></a></li><?php endif; ?>
+    </ul>
+
+    <?php
+      $services = [
+        'Leistungen Allgemein' => ['key' => 'services_general', 'labels' => $this->servicesLabels['general'] ?? []],
+        'Fördermitglied/Lieferant' => ['key' => 'services_supplier', 'labels' => $this->servicesLabels['supplier'] ?? []],
+        'Sachverständiger' => ['key' => 'services_expert', 'labels' => $this->servicesLabels['expert'] ?? []],
+      ];
+      foreach ($services as $title => $cfg):
+        $vals = (array) ($it[$cfg['key']] ?? []);
+        $vals = array_values(array_filter($vals, function($v){ return (string)$v !== ''; }));
+        if (!$vals) continue;
+    ?>
+      <section class="member-services">
+        <h2><?= $this->escapeHtml($title) ?></h2>
+        <ul>
+          <?php foreach ($vals as $v): ?>
+            <li><?= $this->escapeHtml($cfg['labels'][$v] ?? $v) ?></li>
+          <?php endforeach; ?>
+        </ul>
+      </section>
+    <?php endforeach; ?>
+
+    <?php if ($this->hasMap): ?>
+      <div id="cm-map" style="width:100%;height:420px;"></div>
+      <script>
+        (function(){
+          var c = '<?= $this->item['cm_membergooglemaps_coords'] ?>'.split(',');
+          if (c.length<2) return;
+          var pt = {lat: parseFloat(c[0]), lng: parseFloat(c[1])};
+          var s = document.createElement('script');
+          var apiKey = '<?= htmlspecialchars((string)($this->googleApiKey ?? ''), ENT_QUOTES, 'UTF-8') ?>';
+          s.src = (location.protocol==='https:'?'https://':'http://')+'maps.googleapis.com/maps/api/js'+(apiKey?('?key='+apiKey):'');
+          s.async = true; s.defer = true; s.onload = function(){
+            var map = new google.maps.Map(document.getElementById('cm-map'), {zoom: 14, center: pt});
+            new google.maps.Marker({position: pt, map: map});
+          };
+          document.body.appendChild(s);
+        })();
+      </script>
+    <?php endif; ?>
+  </div>
+<?php endif; ?>
+
+<?php $this->endblock(); ?>

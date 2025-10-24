@@ -1,0 +1,77 @@
+<div class="<?= $this->class; ?> ce_table listing block"<?= $this->cssID; ?><?php if ($this->style): ?> style="<?= $this->style; ?>"<?php endif; ?>>
+<?php if ($this->headline): ?>
+<<?= $this->hl; ?>><?= $this->headline; ?></<?= $this->hl; ?>>
+<?php endif; ?>
+
+<div class="cm_finder">
+<form action="<?= $this->action; ?>" method="get">
+  <?php if (!($this->has_cm_country_param ?? false) && ($this->cm_default_country ?? '') !== ''): ?>
+    <input type="hidden" name="cm_country" value="<?= $this->cm_default_country; ?>">
+  <?php endif; ?>
+  <?php if ($this->filterform): ?>
+  <div class="mgroupfilter">
+    <?= $this->filter_fields; ?>
+  </div>
+  <?php endif; ?>
+  <div class="formbody">
+    <input type="hidden" name="order_by" value="<?= $this->order_by; ?>" >
+    <input type="hidden" name="sort" value="<?= $this->sort; ?>" >
+    <input type="hidden" name="per_page" value="<?= $this->per_page; ?>" >
+
+<?php if ($this->fieldsearch && !$this->multifieldsearch): ?>
+    <label for="ctrl_search" class="notinvisible"><?= $this->fields_label; ?></label>
+    <select name="search" id="ctrl_search" class="select">
+      <?= $this->search_fields; ?>
+    </select>
+<?php endif; ?>
+
+<?php if ($this->fieldsearch || $this->multifieldsearch): ?>
+    <label for="ctrl_for" class="notinvisible"><?= $this->keywords_label; ?></label>
+    <input type="text" name="for" id="ctrl_for" class="text" value="<?= $this->for; ?>" >
+<?php endif; ?>
+
+<?php if ($this->plzsearch) : ?>
+  <p class="search_by plzsearch"><?= $this->plz_search; ?></p>
+  <label for="ctrl_plzarea" class="notinvisible"><?= $this->plzarea_label; ?></label>
+  <input type="text" name="plzarea" id="ctrl_plzarea" class="text" value="<?= $this->plzarea; ?>" >
+<?php endif; ?>
+
+<?php if ($this->fieldsearch || $this->multifieldsearch || $this->plzsearch): ?>
+    <input type="submit" class="submit" value="<?= $this->search_label; ?>" >
+<?php endif; ?>
+  </div>
+
+  <?php if ($this->radiusform) : ?>
+  <p><?= $this->radius_search; ?></p>
+  <div class="formbody">
+    <label for="cm_location"><?= $this->lbl_location; ?></label>
+    <input type="text" name="cm_location" class="cm_location" value="<?= $this->visitorlocation ?>" >
+    <label for="cm_country"><?= $this->lbl_country; ?></label>
+	<?= $this->visitorcountry; ?>
+    <?php if ($this->distanceform) : ?>
+    <br>
+    <?php if ($this->distanceasdropdown) : ?>
+    <label for="cm_max_dist"><?= $this->lbl_max_dist_drdn; ?></label>
+    <select name="cm_max_dist" id="cm_max_dist_drdn" class="cm_max_dist_select">
+      <?= $this->distvalues; ?>
+    </select>
+     <?php else : ?>
+    <label for="cm_max_dist"><?= $this->lbl_max_dist; ?></label>
+    <?= $this->distanceobj;?>
+    <input type="text" name="cm_max_dist" class="cm_max_dist" value="<?= $this->max_dist; ?>">
+    <?php endif ?>
+    <span class="distitem"><?= $this->cm_distitem; ?></span>
+    <?php endif; ?>
+    <?php if ($this->cm_gc_acceptance_required) : ?>
+    <div class="checkbox_container">
+    	<input type="checkbox" name="cm_gc_privacy" class="cm_gc_privacy" value="accepted">
+    	<label for="cm_gc_privacy"><?= $this->cm_gc_privacy_label; ?></label>
+    </div>
+    <?php endif; ?>
+    <input type="submit" class="submit" value="<?= $this->distsearch_label; ?>" >
+ </div>
+  <?php endif; ?>
+</form>
+</div>
+
+</div>
