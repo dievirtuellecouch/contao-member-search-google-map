@@ -1,3 +1,69 @@
+<?php if (!empty($this->allInOne)): ?>
+<div class="cm_finder cm_finder--inline">
+  <?php
+    $resolvedAction = (string) ($this->action ?? '');
+    try {
+      $db = \Contao\Database::getInstance();
+      $res = $db->prepare('SELECT cmf_target, cm_memberlist_pg, jumpTo FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
+      if ($res->numRows) {
+        $targetId = (int) ($res->cmf_target ?: ($res->cm_memberlist_pg ?: $res->jumpTo));
+        if ($targetId > 0) {
+          if ($page = \Contao\PageModel::findByPk($targetId)) {
+            $url = $page->getFrontendUrl();
+            $base = rtrim(\Contao\Environment::get('base'), '/');
+            $resolvedAction = $base . '/' . ltrim($url, '/');
+            $reqPath = parse_url(\Contao\Environment::get('request'), PHP_URL_PATH) ?: '';
+            if (str_starts_with($reqPath, '/preview.php/') && !str_starts_with($resolvedAction, '/preview.php/')) {
+              $resolvedAction = $base . '/preview.php/' . ltrim($url, '/');
+            }
+          }
+        }
+      }
+    } catch (\Throwable $e) {}
+  ?>
+  <form action="<?= $resolvedAction; ?>" method="get">
+    <input type="hidden" name="cmf_submitted" value="1">
+    <div class="formbody">
+      <?php if ($this->fieldsearch && !$this->multifieldsearch): ?>
+        <label for="ctrl_search" class="notinvisible"><?= $this->fields_label; ?></label>
+        <select name="search" id="ctrl_search" class="select"><?= $this->search_fields ?? '' ?></select>
+      <?php endif; ?>
+      <?php if ($this->fieldsearch || $this->multifieldsearch): ?>
+        <label for="ctrl_for" class="notinvisible"><?= $this->keywords_label; ?></label>
+        <input type="text" name="for" id="ctrl_for" class="text" value="<?= $this->for ?? '' ?>">
+      <?php endif; ?>
+      <label for="plz" class="notinvisible">Postleitzahl</label>
+      <input type="text" name="plz" id="plz" class="text" value="<?= $this->plz; ?>">
+      <?php if (!empty($this->field_inputs)): ?>
+        <div class="cm-field-inputs">
+          <?= $this->field_inputs ?>
+        </div>
+      <?php endif; ?>
+      <?php if (!empty($this->show_country)) : ?>
+        <label for="cm_country"><?= $this->lbl_country; ?></label>
+        <?= $this->visitorcountry; ?>
+      <?php endif; ?>
+      <?php if ($this->distanceform) : ?>
+        <br>
+        <?php if ($this->distanceasdropdown) : ?>
+          <label for="cm_max_dist"><?= $this->lbl_max_dist_drdn; ?></label>
+          <select name="cm_max_dist" id="cm_max_dist_drdn" class="cm_max_dist_select"><?= $this->distvalues; ?></select>
+        <?php else: ?>
+          <label for="cm_max_dist"><?= $this->lbl_max_dist; ?></label>
+          <input type="text" name="cm_max_dist" class="cm_max_dist" value="<?= $this->max_dist; ?>">
+        <?php endif; ?>
+          <span class="distitem"><?= $this->cm_distitem; ?></span>
+      <?php endif; ?>
+      <?php if (!empty($this->show_address)) : ?>
+        <label for="cm_location"><?= $this->lbl_location; ?></label>
+        <input type="text" name="cm_location" class="cm_location" value="<?= $this->visitorlocation ?>">
+      <?php endif; ?>
+      <input type="submit" class="submit" value="<?= $this->distsearch_label; ?>">
+    </div>
+  </form>
+</div>
+<?php endif; ?>
+
 <?php if (!empty($this->includeMap) && ($this->mapPosition ?? 'bottom') === 'top'): ?>
   <?php
     // Allow Google Maps resources in CSP and fetch a nonce for inline scripts (Contao 4.13+/5)

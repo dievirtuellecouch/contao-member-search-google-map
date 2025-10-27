@@ -4,7 +4,7 @@
 $GLOBALS['FE_MOD']['user']['cm_membergooglemapsList'] = \Cm\MemberGoogleMapsBundle\Module\MemberGoogleMapsListModule::class;
 $GLOBALS['FE_MOD']['user']['cm_membergooglemapsReader'] = \Cm\MemberGoogleMapsBundle\Module\MemberGoogleMapsReaderModule::class;
 // Legacy finder module alias for search form
-$GLOBALS['FE_MOD']['user']['cm_memberfinder'] = \Cm\MemberGoogleMapsBundle\Module\MemberFinderModule::class;
+$GLOBALS['FE_MOD']['user']['cm_memberfinder'] = \Cm\MemberGoogleMapsBundle\Module\MemberGoogleMapsListModule::class;
 
 // Back end widgets
 $GLOBALS['BE_FFL']['cm_ListWizard'] = \Cm\MemberGoogleMapsBundle\Widget\ListSelectWizard::class;

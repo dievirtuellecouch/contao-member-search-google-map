@@ -24,15 +24,15 @@ $GLOBALS['TL_DCA']['tl_module']['subpalettes']['cm_membergooglemaps_tableless'] 
 $GLOBALS['TL_DCA']['tl_module']['subpalettes']['cm_map_showmaponempty'] = 'cm_map_centerempty,cm_map_zoomempty';
 
 // Palette for the member finder module configuration (mirror 3.5)
-$GLOBALS['TL_DCA']['tl_module']['palettes']['cm_memberfinder'] = '{title_legend},name,headline,type;{config_legend},cm_memberlist_pg,ml_fields,cm_membergooglemaps_fieldslist;{cm_search_legend},cm_usetags,cm_memberlist_fieldsearch,cm_memberlist_multifieldseach,ml_search_fields,cm_memberlist_plzsearch;{cm_memberlist_distancesearch},cm_memberlist_addressform,cm_map_country,cm_map_country_as_select,cm_gc_acceptance_required,cm_memberlist_distanceform,cm_memberlist_distanceasdropdown;{protected_legend:hide},protected;{expert_legend:hide},guests,cssID,space';
+$GLOBALS['TL_DCA']['tl_module']['palettes']['cm_memberfinder'] = '{title_legend},name,headline,type;{config_legend},cmf_target,cm_membergooglemaps_fieldslist;{cm_search_legend},cm_usetags,cm_memberlist_fieldsearch,cm_memberlist_multifieldseach,ml_search_fields,cm_memberlist_addressform;{cm_memberlist_distancesearch},cm_memberlist_plzsearch,cm_map_country,cm_map_country_as_select,cm_gc_acceptance_required,cm_memberlist_distanceform,cm_memberlist_distanceasdropdown;{protected_legend:hide},protected;{expert_legend:hide},guests,cssID,space';
 
 // Palette for list view with Google Maps (based on 3.5)
 $GLOBALS['TL_DCA']['tl_module']['palettes']['cm_membergooglemapsList'] =
     '{title_legend},name,headline,type;'
-   .'{config_legend},ml_groups,ml_fields,perPage;'
-   .'{cm_membergooglemaps_layout},cm_membergooglemaps_tableless,cm_membergooglemaps_fieldslist,cm_memberlist_hidedetaillink,cm_membergooglemaps_linktowebsite,cm_membergooglemaps_linkroute;'
-   .'{cm_search_legend},cm_usetags,cm_memberlist_fieldsearch,cm_memberlist_multifieldseach,ml_search_fields,cm_memberlist_plzsearch;'
-   .'{cm_memberlist_distancesearch},cm_memberlist_addressform,cm_map_country,cm_map_country_as_select,cm_gc_acceptance_required,cm_memberlist_distanceform,cm_memberlist_distanceasdropdown;'
+   .'{config_legend},cmf_target,ml_groups,perPage;'
+   .'{cm_membergooglemaps_layout},cm_membergooglemaps_tableless,cm_membergooglemaps_fieldslist,cm_memberlist_showall_on_empty,cm_memberlist_hidedetaillink,cm_membergooglemaps_linktowebsite,cm_membergooglemaps_linkroute;'
+   .'{cm_search_legend},cm_usetags,cm_memberlist_fieldsearch,cm_memberlist_multifieldseach,ml_search_fields,cm_memberlist_addressform;'
+   .'{cm_memberlist_distancesearch},cm_memberlist_plzsearch,cm_map_country,cm_map_country_as_select,cm_gc_acceptance_required,cm_memberlist_distanceform,cm_memberlist_distanceasdropdown;'
    .'{templatelst_legend:hide},map_maintemplate,map_lsttemplate,map_infotemplate;'
    .'{cm_membergooglemaps_showmaplist},cm_map_onlist;'
    .'{cm_map_empty_legend},cm_memberlist_notfound,cm_map_showmaponempty;'
@@ -40,7 +40,7 @@ $GLOBALS['TL_DCA']['tl_module']['palettes']['cm_membergooglemapsList'] =
 
 // Target page for results
 $GLOBALS['TL_DCA']['tl_module']['fields']['cmf_target'] = [
-    'label' => ['Zielseite für Ergebnisse', 'Seite, auf der die Ergebnisliste angezeigt wird.'],
+    'label' => ['Weiterleitungsseite', 'Seite, auf die nach der Suche weitergeleitet wird und auf der die Ergebnisse angezeigt werden.'],
     'exclude' => true,
     'inputType' => 'pageTree',
     'eval' => ['fieldType' => 'radio', 'tl_class' => 'clr'],
@@ -182,6 +182,16 @@ $GLOBALS['TL_DCA']['tl_module']['fields']['cm_membergooglemaps_tableless'] = [
     'exclude' => true,
     'inputType' => 'checkbox',
     'eval' => ['tl_class'=>'clr m12'],
+    'sql'  => "char(1) NOT NULL default ''",
+];
+
+// New: Show all results when no filter is set
+$GLOBALS['TL_DCA']['tl_module']['fields']['cm_memberlist_showall_on_empty'] = [
+    'label' => ['Alle Ergebnisse anzeigen', 'Wenn kein Filter gesetzt ist, alle Ergebnisse anzeigen.'],
+    'exclude' => true,
+    'inputType' => 'checkbox',
+    // Place on a new row (above "Detaillink ausblenden") and half width
+    'eval' => ['tl_class'=>'clr w50 m12'],
     'sql'  => "char(1) NOT NULL default ''",
 ];
 

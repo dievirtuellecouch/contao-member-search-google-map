@@ -21,6 +21,14 @@ class MemberGoogleMapsListModule extends Module
 
     public function generate()
     {
+        // Unconditional probe to verify active class at runtime
+        try {
+            $this->logProbe('enter_generate', [
+                'class' => __CLASS__,
+                'moduleId' => (int) ($this->id ?? 0),
+                'request' => (string) (Environment::get('request') ?? ''),
+            ]);
+        } catch (\Throwable $e) { /* ignore */ }
         if (\defined('TL_MODE') && TL_MODE === 'BE') {
             $tpl = new BackendTemplate('be_wildcard');
             $tpl->wildcard = '### CM MEMBER GOOGLE MAPS LIST ###';
@@ -50,14 +58,97 @@ class MemberGoogleMapsListModule extends Module
         } catch (\Throwable $e) {
             // keep default template
         }
+
+        // Enable debug logging early if requested via query
+        $this->cmDebugEnabled = (\Contao\Input::get('cm_debug') !== null);
+
+        // Early redirect: if the search was submitted on a different page,
+        // forward to the configured result page with the current query string.
+        try {
+            $hasSearch = (
+                \Contao\Input::get('cm_location') !== null
+                || \Contao\Input::get('cm_country') !== null
+                || \Contao\Input::get('cm_max_dist') !== null
+                || \Contao\Input::get('cm_max_dist_select') !== null
+                || \Contao\Input::get('for') !== null
+                || \Contao\Input::get('cm_search') !== null
+                || \Contao\Input::get('plz') !== null
+                || \Contao\Input::get('plzarea') !== null
+                || \Contao\Input::get('cmf_submitted') !== null
+            );
+            if ($hasSearch) {
+                $this->logProbe('has_search_detected', ['class' => __CLASS__, 'moduleId' => (int) ($this->id ?? 0)]);
+                // Resolve target page (prefer Weiterleitungsseite)
+                $tg = (int) ($this->cmf_target ?? 0);
+                $pg = (int) ($this->cm_memberlist_pg ?? 0);
+                $jt = (int) ($this->jumpTo ?? 0);
+                if ((!$tg && !$pg && !$jt) && isset($this->id)) {
+                    $res = \Contao\Database::getInstance()->prepare('SELECT cmf_target, cm_memberlist_pg, jumpTo FROM tl_module WHERE id=?')->limit(1)->execute((int)$this->id);
+                    if ($res->numRows) { $tg = (int)$res->cmf_target; $pg = (int)$res->cm_memberlist_pg; $jt = (int)$res->jumpTo; }
+                }
+                $targetId = $tg ?: ($pg ?: $jt);
+                if ($targetId > 0) {
+                    if ($page = \Contao\PageModel::findByPk($targetId)) {
+                        $url = $page->getFrontendUrl();
+                        $base = rtrim(\Contao\Environment::get('base'), '/');
+                        $targetAbs = $base.'/'.ltrim($url, '/');
+                        $reqPath = parse_url(\Contao\Environment::get('request') ?: '', PHP_URL_PATH) ?: '';
+                        $tgtPath = parse_url($targetAbs, PHP_URL_PATH) ?: '';
+                        // Adjust for preview mode
+                        if ($reqPath && str_starts_with($reqPath, '/preview.php/') && !str_starts_with($tgtPath, '/preview.php/')) {
+                            $tgtPath = '/preview.php'.$tgtPath;
+                        }
+                        // Build query string, enforcing default cm_country if configured and missing
+                        $qs = $_SERVER['QUERY_STRING'] ?? '';
+                        $params = [];
+                        if ($qs !== '') { parse_str($qs, $params); }
+                        $defCountry = strtolower(trim((string) ($this->cm_map_country ?? '')));
+                        if (!isset($params['cm_country']) && $defCountry !== '') {
+                            $params['cm_country'] = $defCountry;
+                            $qs = http_build_query($params);
+                        }
+                        $target = $tgtPath.($qs ? ('?'.$qs) : '');
+                        if ($reqPath !== $tgtPath) {
+                            $this->dbg('redirect_force', [ 'targetId' => $targetId, 'target' => $target ]);
+                            $this->logSys('member_search_redirect', [ 'targetId' => $targetId, 'target' => $target ]);
+                            \Contao\Controller::redirect($target);
+                        } else {
+                            $this->dbg('redirect_skip_same_path', [ 'path' => $reqPath ]);
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // Do not break page on redirect errors
+            $this->dbg('redirect_error', [ 'error' => $e->getMessage() ]);
+        }
         $html = parent::generate();
         return $html;
     }
 
     protected function compile(): void
     {
+        // Unconditional probe for compile to verify class/template usage
+        try { $this->logProbe('enter_compile', ['class' => __CLASS__, 'moduleId' => (int) ($this->id ?? 0)]); } catch (\Throwable $e) {}
         $this->Template->action = Environment::get('request');
         $this->cmDebugEnabled = (Input::get('cm_debug') !== null);
+
+        // Detect whether any filter parameters are present (non-empty)
+        $hasAnyFilter = false;
+        $p = static fn($k) => trim((string) (Input::get($k) ?? ''));
+        $nonEmpty = static fn($v) => $v !== '';
+        $candidates = [
+            $p('cm_search'), $p('for'), $p('cm_location'), $p('plz'), $p('plzarea'),
+            $p('cm_max_dist'), $p('cm_max_dist_select')
+        ];
+        foreach ($candidates as $val) { if ($nonEmpty($val)) { $hasAnyFilter = true; break; } }
+        if (!$hasAnyFilter) {
+            // Treat explicit cm_country param as filter only if it is present in request
+            if (Input::get('cm_country') !== null && $p('cm_country') !== '') { $hasAnyFilter = true; }
+        }
+        // Decide whether to suppress results initially but still render the search form
+        $showAllOnEmpty = (bool) ($this->cm_memberlist_showall_on_empty ?? false);
+        $suppressInitial = (!$hasAnyFilter && !$showAllOnEmpty);
 
         // Inputs
         $postal = trim((string) (Input::get('plz') ?? (Input::get('plzarea') ?? '')));
@@ -88,8 +179,8 @@ class MemberGoogleMapsListModule extends Module
             'privacy_value' => Input::get('cm_gc_privacy')
         ]);
 
-        // Search
-        $search = trim((string) (Input::get('for') ?? ''));
+        // Search (rename param 'for' -> 'cm_search', keep BC fallback)
+        $search = trim((string) (Input::get('cm_search') ?? (Input::get('for') ?? '')));
         // preferred search fields from module
         $searchFields = StringUtil::deserialize($this->ml_search_fields ?? '', true);
         // Fallbacks if empty: read directly from tl_module (migration-safety), then from legacy field config
@@ -112,15 +203,68 @@ class MemberGoogleMapsListModule extends Module
         }
         // Sanitize list
         $searchFields = array_values(array_filter(array_unique(array_map(function($f){ return preg_match('~^[a-z0-9_]+$~i', (string)$f) ? (string)$f : null; }, (array)$searchFields))));
-        // Always perform a fulltext-like search across the configured fields when input present
+        // Perform search: single-field or multi-field based on module flags
         if ($search !== '') {
-            $likes = [];
-            foreach ($searchFields as $sf) {
-                $likes[] = $sf.' LIKE ?';
-                $values[] = '%'.$search.'%';
+            // Determine flags early (fallback to DB if properties not mapped yet)
+            $fieldsearch = (bool) ($this->cm_memberlist_fieldsearch ?? false);
+            $multifield  = (bool) ($this->cm_memberlist_multifieldseach ?? false);
+            try {
+                if (!$fieldsearch || !$multifield) {
+                    $res = Database::getInstance()->prepare('SELECT cm_memberlist_fieldsearch, cm_memberlist_multifieldseach FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
+                    if ($res->numRows) {
+                        if (!$fieldsearch) { $fieldsearch = (bool) $res->cm_memberlist_fieldsearch; }
+                        if (!$multifield)  { $multifield  = (bool) $res->cm_memberlist_multifieldseach; }
+                    }
+                }
+            } catch (\Throwable $e) {}
+
+            // If an address string is present, limit the keyword search to non-address fields
+            $addrQueryRaw = trim((string) (Input::get('cm_location') ?? ''));
+            $addressFieldNames = ['street','postal','city','country'];
+            $addressFields = array_values(array_intersect($searchFields, $addressFieldNames));
+            $nonAddressFields = array_values(array_diff($searchFields, $addressFields));
+            $targetFields = ($addrQueryRaw !== '' && $nonAddressFields) ? $nonAddressFields : $searchFields;
+
+            if ($fieldsearch && !$multifield) {
+                // Single-field search: respect selected field if valid; otherwise fallback to multi
+                $chosen = (string) (Input::get('search') ?? '');
+                if ($chosen !== '' && in_array($chosen, (array) $targetFields, true)) {
+                    $where .= ' AND '.$chosen.' LIKE ?';
+                    $values[] = '%'.$search.'%';
+                    $this->dbg('search_single', [ 'field' => $chosen ]);
+                } else {
+                    $likes = [];
+                    foreach ($targetFields as $sf) { $likes[] = $sf.' LIKE ?'; $values[] = '%'.$search.'%'; }
+                    if ($likes) { $where .= ' AND ('.implode(' OR ', $likes).')'; }
+                    $this->dbg('search_multi_fallback', [ 'fields' => $targetFields ]);
+                }
+            } else {
+                // Multi-field search across configured fields
+                $likes = [];
+                foreach ($targetFields as $sf) { $likes[] = $sf.' LIKE ?'; $values[] = '%'.$search.'%'; }
+                if ($likes) { $where .= ' AND ('.implode(' OR ', $likes).')'; }
+                $this->dbg('search_multi', [ 'fields' => $targetFields ]);
             }
-            if ($likes) { $where .= ' AND ('.implode(' OR ', $likes).')'; }
-            $this->dbg('search_multi', [ 'fields' => $searchFields ]);
+        }
+
+        // Per-field filters (visible when address form is enabled): build AND filters for each filled field
+        $perFieldFilters = [];
+        $perFieldValues = [];
+        // Skip address fields here (they have dedicated inputs)
+        $addressFieldNames = ['street','postal','city','country'];
+        foreach ($searchFields as $sf) {
+            if (in_array($sf, $addressFieldNames, true)) { continue; }
+            $param = 'cm_'.$sf;
+            $val = trim((string) (Input::get($param) ?? ''));
+            if ($val !== '') {
+                $perFieldFilters[] = $sf.' LIKE ?';
+                $perFieldValues[] = '%'.$val.'%';
+            }
+        }
+        if ($perFieldFilters) {
+            $where .= ' AND ('.implode(' OR ', $perFieldFilters).')';
+            foreach ($perFieldValues as $v) { $values[] = $v; }
+            $this->dbg('search_per_field_or', [ 'fields' => $searchFields ]);
         }
 
         // Postal filter: decided later based on whether distance search is active
@@ -141,25 +285,40 @@ class MemberGoogleMapsListModule extends Module
 
         // Fields to display
         $displayFields = [];
+        // Fields selected under "Durchsuchte Felder" may be shown as well when address form is enabled
+        $searchFieldsConfigured = StringUtil::deserialize($this->ml_search_fields ?? '', true);
+        if (!\is_array($searchFieldsConfigured)) { $searchFieldsConfigured = []; }
         $rows = StringUtil::deserialize($this->cm_membergooglemaps_fieldslist ?? '', true);
         if ($rows && \is_array($rows)) {
             foreach ($rows as $r) { if (!empty($r['field'])) { $displayFields[] = (string) $r['field']; } }
         }
-        if (!$displayFields) { $displayFields = StringUtil::deserialize($this->ml_fields ?? '', true); }
+        if (!$displayFields) { $displayFields = $searchFieldsConfigured; }
         if (!$displayFields) { $displayFields = ['company','firstname','lastname','street','postal','city','website']; }
+        // Early decide if address form is enabled to include search fields into display
+        $showAddressEarly = (bool) ($this->cm_memberlist_addressform ?? false);
+        if (!$showAddressEarly) {
+            try {
+                $resAddr = Database::getInstance()->prepare('SELECT cm_memberlist_addressform FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
+                if ($resAddr->numRows) { $showAddressEarly = (bool) $resAddr->cm_memberlist_addressform; }
+            } catch (\Throwable $e) {}
+        }
+        if ($showAddressEarly && $searchFieldsConfigured) {
+            $displayFields = array_values(array_unique(array_merge($displayFields, $searchFieldsConfigured)));
+        }
 
         // SELECT (always include address columns so templates can render city/postal regardless of config)
-        $mlFields = StringUtil::deserialize($this->ml_fields ?? '', true);
         // Ensure avatar, address and person name columns are selected so templates can render them regardless of field config
         $baseCols = ['id','alias','cm_membergooglemaps_coords','groups','avatar','street','postal','city','country','firstname','lastname'];
-        $select = array_unique(array_merge($baseCols, $displayFields, (array)$mlFields));
+        // Always include configured search fields in SELECT so they are available for output when address form is enabled
+        $select = array_unique(array_merge($baseCols, $displayFields, (array)$searchFieldsConfigured));
         $selectSql = implode(',', array_filter(array_map(fn($f) => preg_match('~^[a-z0-9_]+$~i', $f) ? $f : null, $select)));
         if (!$selectSql) { $selectSql = 'id,alias,cm_membergooglemaps_coords'; }
 
         // Distance filter using Google geocoded visitor location
         $lat1 = null; $lng1 = null; $hasLocal = false;
         // Determine effective max distance: request value or module defaults
-        $maxDist = (int) (Input::get('cm_max_dist') ?? 0);
+        // Max distance: accept new name 'cm_max_dist_select' (dropdown) and fallback to 'cm_max_dist'
+        $maxDist = (int) (Input::get('cm_max_dist_select') ?? (Input::get('cm_max_dist') ?? 0));
         if ($maxDist <= 0) {
             // Try to parse legacy distance values with [default]
             $def = 0; $opt = [];
@@ -175,12 +334,13 @@ class MemberGoogleMapsListModule extends Module
             elseif (!empty($this->cmf_default_dist)) { $maxDist = (int) $this->cmf_default_dist; }
             elseif (!empty($opt)) { $maxDist = (int) ($opt[0] ?? 0); }
         }
-        // Trigger geocoding if either a location OR a postal (from plz/plzarea/cm_location numeric) is present
+        // Trigger geocoding when a free-text location is provided OR when PLZ + distance are given
         $wantGeocode = false;
-        if (Input::get('cm_location') !== null && trim((string) Input::get('cm_location')) !== '') {
-            $wantGeocode = true;
-        } elseif ($postal !== '') {
-            $wantGeocode = true;
+        $cmLoc = trim((string) (Input::get('cm_location') ?? ''));
+        if ($cmLoc !== '') { $wantGeocode = true; }
+        if (!$wantGeocode) {
+            $plzOnly = trim((string) $postal) !== '';
+            if ($plzOnly && $maxDist > 0) { $wantGeocode = true; }
         }
         // Perform geocoding whenever a location was provided (independent of map privacy checkbox)
         if ($wantGeocode) {
@@ -259,12 +419,13 @@ class MemberGoogleMapsListModule extends Module
             'radiusUsed' => $this->cmRadiusUsed,
         ]);
 
-        $stmt = Database::getInstance()->prepare("SELECT $selectSql FROM tl_member WHERE $where ORDER BY $orderBy");
-        $result = $stmt->execute(...$values);
-
         $items = [];
-        $filterGroups = \Contao\StringUtil::deserialize($this->ml_groups ?? '', true);
-        while ($result->next()) {
+        if (!$suppressInitial) {
+            $stmt = Database::getInstance()->prepare("SELECT $selectSql FROM tl_member WHERE $where ORDER BY $orderBy");
+            $result = $stmt->execute(...$values);
+
+            $filterGroups = \Contao\StringUtil::deserialize($this->ml_groups ?? '', true);
+            while ($result->next()) {
             $row = $result->row();
             if ($filterGroups) {
                 $memberGroups = \Contao\StringUtil::deserialize($row['groups'] ?? '', true);
@@ -368,7 +529,8 @@ class MemberGoogleMapsListModule extends Module
                     $item[$f] = $val;
                 }
             }
-            $items[] = $item;
+                $items[] = $item;
+            }
         }
 
         // Ensure German field labels are available
@@ -383,7 +545,8 @@ class MemberGoogleMapsListModule extends Module
         $this->Template->displayFields = $displayFields;
         $this->Template->fieldLabels = $labelMap;
         $this->Template->hasResults = \count($items) > 0;
-        $this->Template->notFoundMessage = (string) ($this->cm_memberlist_notfound ?: 'Keine Einträge gefunden.');
+        // Do not show a "not found" message on initial, unfiltered load when suppression is active
+        $this->Template->notFoundMessage = $suppressInitial ? '' : (string) ($this->cm_memberlist_notfound ?: 'Keine Einträge gefunden.');
         $this->Template->linkWebsite = (bool) $this->cm_membergooglemaps_linktowebsite;
         $this->Template->linkRoute = $linkRouteFlag;
         $this->Template->listdistance = $this->cmRadiusUsed;
@@ -501,22 +664,21 @@ class MemberGoogleMapsListModule extends Module
         $plzsearch   = (bool) $this->cm_memberlist_plzsearch;
         // DB fallback if properties are not mapped
         try {
-            if (!($showAddress && $distForm && $distAsDrop)) {
-                $res = Database::getInstance()->prepare('SELECT cm_memberlist_addressform, cm_memberlist_distanceform, cm_memberlist_distanceasdropdown, cm_map_country, cm_map_country_as_select, cm_memberlist_fieldsearch, cm_memberlist_multifieldseach, cm_memberlist_plzsearch FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
-                if ($res->numRows) {
-                    $showAddress = (bool) ($res->cm_memberlist_addressform ?: $showAddress);
-                    $distForm    = (bool) ($res->cm_memberlist_distanceform ?: $distForm);
-                    $distAsDrop  = (bool) ($res->cm_memberlist_distanceasdropdown ?: $distAsDrop);
-                    $selectCountry = (bool) (($res->cm_map_country_as_select ?: $this->cm_map_country_as_select));
-                    $fieldsearch = (bool) ($res->cm_memberlist_fieldsearch ?: $fieldsearch);
-                    $multifield  = (bool) ($res->cm_memberlist_multifieldseach ?: $multifield);
-                    $plzsearch   = (bool) ($res->cm_memberlist_plzsearch ?: $plzsearch);
-                }
+            $res = Database::getInstance()->prepare('SELECT cm_memberlist_addressform, cm_memberlist_distanceform, cm_memberlist_distanceasdropdown, cm_map_country, cm_map_country_as_select, cm_memberlist_fieldsearch, cm_memberlist_multifieldseach, cm_memberlist_plzsearch FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
+            if ($res->numRows) {
+                // Always take DB values when present to avoid sticky defaults
+                $showAddress   = (bool) $res->cm_memberlist_addressform;
+                $distForm      = (bool) $res->cm_memberlist_distanceform;
+                $distAsDrop    = (bool) $res->cm_memberlist_distanceasdropdown;
+                $selectCountry = (bool) $res->cm_map_country_as_select;
+                $fieldsearch   = (bool) $res->cm_memberlist_fieldsearch;
+                $multifield    = (bool) $res->cm_memberlist_multifieldseach;
+                $plzsearch     = (bool) $res->cm_memberlist_plzsearch;
             }
         } catch (\Throwable $e) {}
 
-        // All-in-one form: show if either field/PLZ search or address form is enabled (legacy behavior)
-        $this->Template->allInOne = ($showAddress || $fieldsearch || $multifield || $plzsearch);
+        // All-in-one form: show if any search control is enabled (address, keyword, PLZ or distance)
+        $this->Template->allInOne = ($showAddress || $fieldsearch || $multifield || $plzsearch || $distForm);
 
         // Labels
         try { \Contao\Controller::loadLanguageFile('default'); } catch (\Throwable $e) {}
@@ -524,7 +686,8 @@ class MemberGoogleMapsListModule extends Module
         $this->Template->search_label    = (string) ($MSC['search'] ?? 'Suchen');
         $this->Template->per_page_label  = (string) ($MSC['list_perPage'] ?? 'Ergebnisse pro Seite');
         $this->Template->fields_label    = (string) (($MSC['all_fields'][0] ?? null) ?: 'Feld');
-        $this->Template->keywords_label  = (string) ($MSC['keywords'] ?? 'Suchbegriffe');
+        // Requested label for text search field
+        $this->Template->keywords_label  = 'Firma / Name / Leistungen';
         $this->Template->plz_search      = (string) ($MSC['cm_plz_search'] ?? 'PLZ-Suche');
         $this->Template->plzarea_label   = (string) ($MSC['plzarea'] ?? 'PLZ-Bereich');
         $this->Template->lbl_location    = $showAddress ? 'PLZ / Ort' : ((string) ($MSC['cm_lbl_location'] ?? 'Adresse:'));
@@ -538,15 +701,65 @@ class MemberGoogleMapsListModule extends Module
         // Flags
         $this->Template->fieldsearch   = $fieldsearch;
         $this->Template->multifieldsearch = $multifield;
+        $this->Template->for = $search; // BC for templates still using 'for'
+        $this->Template->cm_search = $search;
+        // Build search field options (for single-field dropdown), based on configured search fields
+        $opts = '';
+        $curSel = (string) (Input::get('search') ?? '');
+        if ($fieldsearch && !$multifield) {
+            try { Controller::loadLanguageFile('tl_member'); Controller::loadDataContainer('tl_member'); } catch (\Throwable $e) {}
+            foreach ($searchFields as $sf) {
+                $label = $GLOBALS['TL_DCA']['tl_member']['fields'][$sf]['label'][0] ?? ($GLOBALS['TL_LANG']['tl_member'][$sf][0] ?? ucfirst((string)$sf));
+                $sel = ($sf === $curSel) ? ' selected' : '';
+                $opts .= '<option value="'.htmlspecialchars($sf, ENT_QUOTES).'"'.$sel.'>'.htmlspecialchars((string)$label, ENT_QUOTES).'</option>';
+            }
+        }
+        $this->Template->search_fields = $opts;
+
+        // Build per-field input HTML (only render if address fields section is enabled)
+        $fieldInputsHtml = '';
+        if ($showAddressEarly && $searchFieldsConfigured) {
+            try { Controller::loadLanguageFile('tl_member'); Controller::loadDataContainer('tl_member'); } catch (\Throwable $e) {}
+            $addressFieldNames = ['street','postal','city','country'];
+            foreach ($searchFieldsConfigured as $sf) {
+                if (in_array($sf, $addressFieldNames, true)) { continue; }
+                $lab = $GLOBALS['TL_DCA']['tl_member']['fields'][$sf]['label'][0]
+                    ?? ($GLOBALS['TL_LANG']['tl_member'][$sf][0] ?? ucfirst((string)$sf));
+                $val = htmlspecialchars((string) (Input::get('cm_'.$sf) ?? ''), ENT_QUOTES);
+                $fieldInputsHtml .= '<label class="cm_sf_label" for="cm_'.htmlspecialchars($sf, ENT_QUOTES).'">'.htmlspecialchars((string)$lab, ENT_QUOTES).'</label>';
+                $fieldInputsHtml .= '<input type="text" class="cm_sf_input" name="cm_'.htmlspecialchars($sf, ENT_QUOTES).'" id="cm_'.htmlspecialchars($sf, ENT_QUOTES).'" value="'.$val.'">';
+            }
+        }
+        $this->Template->field_inputs = $fieldInputsHtml;
+        // Build unified search inputs block (non-address fields) in configured order
+        $searchInputsHtml = '';
+        if ($searchFieldsConfigured) {
+            try { Controller::loadLanguageFile('tl_member'); Controller::loadDataContainer('tl_member'); } catch (\Throwable $e) {}
+            $addressFieldNames = ['street','postal','city','country'];
+            foreach ($searchFieldsConfigured as $sf) {
+                if (in_array($sf, $addressFieldNames, true)) { continue; }
+                $lab = $GLOBALS['TL_DCA']['tl_member']['fields'][$sf]['label'][0]
+                    ?? ($GLOBALS['TL_LANG']['tl_member'][$sf][0] ?? ucfirst((string)$sf));
+                $val = htmlspecialchars((string) (Input::get('cm_'.$sf) ?? ''), ENT_QUOTES);
+                $searchInputsHtml .= '<label class="cm_field_label" for="cm_'.htmlspecialchars($sf, ENT_QUOTES).'">'.htmlspecialchars((string)$lab, ENT_QUOTES).'</label>';
+                $searchInputsHtml .= '<input type="text" class="cm_field_input" name="cm_'.htmlspecialchars($sf, ENT_QUOTES).'" id="cm_'.htmlspecialchars($sf, ENT_QUOTES).'" value="'.$val.'">';
+            }
+        }
+        $this->Template->search_inputs = $searchInputsHtml;
+
+        // Do not render individual address inputs (cm_street, cm_postal, cm_city) anymore
+        $this->Template->address_inputs = '';
         $this->Template->plzsearch     = $plzsearch;
         $this->Template->plzarea       = trim((string) (Input::get('plzarea') ?? ''));
-        $this->Template->radiusform    = $showAddress; // legacy: whole block controlled by addressform
+        // Radius block should render when address OR distance is enabled
+        $this->Template->radiusform    = ($showAddress || $distForm);
         $this->Template->distanceform  = $distForm;
         $this->Template->distanceasdropdown = $distAsDrop;
 
-        // Country select
+        // Country select (only if 'Länderfeld als Auswahl' is active)
         $defaultCountry = strtolower(trim((string) ($this->cm_map_country ?? '')));
-        $selected = strtolower(trim((string) (Input::get('cm_country') ?? ($defaultCountry !== '' ? $defaultCountry : ''))));
+        if ($defaultCountry === '') { $defaultCountry = 'de'; }
+        $selected = strtolower(trim((string) (Input::get('cm_country') ?? $defaultCountry)));
         if ($selectCountry) {
             $countryOpts = [];
             try {
@@ -554,16 +767,18 @@ class MemberGoogleMapsListModule extends Module
                 foreach ($countries as $code => $label) { $countryOpts[strtolower($code)] = $label; }
             } catch (\Throwable $e) { $countryOpts = ['de'=>'Deutschland','at'=>'Österreich','ch'=>'Schweiz']; }
             $countryHtml = '<select name="cm_country" class="cm_country">';
-            if ($selected === '') { $countryHtml .= '<option value="" selected="selected"></option>'; }
             foreach ($countryOpts as $code => $label) { $countryHtml .= '<option value="'.$code.'"'.($code===$selected?' selected="selected"':'').'>'.htmlspecialchars($label, ENT_QUOTES).'</option>'; }
             $countryHtml .= '</select>';
             $this->Template->visitorcountry = $countryHtml;
+            $this->Template->show_country = true;
         } else {
-            $this->Template->visitorcountry = '<input class="cm_country" type="text" name="cm_country" value="'.htmlspecialchars($selected, ENT_QUOTES).'">';
+            // Hide country input when not configured as select
+            $this->Template->visitorcountry = '';
+            $this->Template->show_country = false;
         }
 
-        // Distance options
-        $maxDist = (int) (Input::get('cm_max_dist') ?? 0);
+        // Distance options (read dropdown first, fallback to text)
+        $maxDist = (int) (Input::get('cm_max_dist_select') ?? (Input::get('cm_max_dist') ?? 0));
         $optVals = [];
         if ($distAsDrop && !empty($this->cm_memberlist_distancevalues)) {
             $raw = array_filter(array_map('trim', explode(',', (string) $this->cm_memberlist_distancevalues)), 'strlen');
@@ -716,7 +931,17 @@ class MemberGoogleMapsListModule extends Module
     {
         if (!$this->cmDebugEnabled) { return; }
         try {
-            $dir = dirname(__DIR__, 4).'/var/logs';
+            $dir = '';
+            try {
+                $base = \Contao\System::getContainer()->getParameter('kernel.project_dir');
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            } catch (\Throwable $e) {
+                // Fallback from vendor path up to project root
+                $base = dirname(__DIR__, 6);
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            }
             if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
             // Write to a dedicated radius debug log file
             $file = $dir.'/cm_member_radius.log';
@@ -731,5 +956,51 @@ class MemberGoogleMapsListModule extends Module
         } catch (\Throwable $e) {
             // ignore logging errors
         }
+    }
+
+    private function logSys(string $event, array $context = []): void
+    {
+        try {
+            $msg = $event.(empty($context) ? '' : (' '.json_encode($context, JSON_UNESCAPED_SLASHES)));
+            // Prefer Contao's monolog logger
+            if (\Contao\System::getContainer()->has('monolog.logger.contao')) {
+                $logger = \Contao\System::getContainer()->get('monolog.logger.contao');
+                if (method_exists($logger, 'info')) { $logger->info($msg); return; }
+            }
+            // Fallback to legacy System::log if available
+            if (method_exists(\Contao\System::class, 'log')) {
+                \Contao\System::log($msg, __METHOD__, TL_GENERAL);
+                return;
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+        @error_log($event.(empty($context) ? '' : (' '.json_encode($context))));
+    }
+
+    private function logProbe(string $step, array $context = []): void
+    {
+        try {
+            $dir = '';
+            try {
+                $base = \Contao\System::getContainer()->getParameter('kernel.project_dir');
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            } catch (\Throwable $e) {
+                $base = dirname(__DIR__, 6);
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            }
+            if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
+            $file = $dir.'/cm_member_probe.log';
+            $entry = [
+                'ts' => date('c'),
+                'module' => (int) ($this->id ?? 0),
+                'step' => $step,
+                'uri' => (string) (\Contao\Environment::get('request') ?? ''),
+                'data' => $context,
+            ];
+            @file_put_contents($file, json_encode($entry, JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+        } catch (\Throwable $e) { /* ignore */ }
     }
 }

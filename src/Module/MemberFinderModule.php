@@ -30,26 +30,55 @@ class MemberFinderModule extends Module
 
     protected function compile(): void
     {
+        // Probe log to confirm whether this class is active on the page
+        try {
+            $dir = '';
+            try {
+                $base = \Contao\System::getContainer()->getParameter('kernel.project_dir');
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            } catch (\Throwable $e) {
+                $base = dirname(__DIR__, 6);
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            }
+            if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
+            $file = $dir.'/cm_member_probe.log';
+            $entry = [
+                'ts' => date('c'),
+                'module' => (int) ($this->id ?? 0),
+                'step' => 'finder_enter_compile',
+                'class' => __CLASS__,
+                'uri' => (string) (\Contao\Environment::get('request') ?? ''),
+            ];
+            @file_put_contents($file, json_encode($entry, JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+        } catch (\Throwable $e) { /* ignore */ }
         // Determine target action (prefer explicit target page)
         // Determine target action (prefer explicit target page)
         $this->Template->action = Environment::get('request');
+        $this->logError('finder_enter', [
+            'moduleId' => (int) ($this->id ?? 0),
+            'request'  => (string) (Environment::get('request') ?? ''),
+        ]);
         $lockedAction = false;
-        // Prefer original 3.5 target page field (Listenseite)
-        if (!empty($this->cm_memberlist_pg)) {
-            try {
-                if ($page = PageModel::findByPk((int) $this->cm_memberlist_pg)) {
-                    $url = $page->getFrontendUrl();
-                    $base = rtrim(Environment::get('base'), '/');
-                    $this->Template->action = $base . '/' . ltrim($url, '/');
-                    $lockedAction = true;
-                }
-            } catch (\Throwable $e) {}
-        } elseif (!empty($this->cmf_target)) {
+        // Prefer explicit Weiterleitungsseite (cmf_target) over legacy Listenseite
+        if (!empty($this->cmf_target)) {
             try {
                 if ($page = PageModel::findByPk((int) $this->cmf_target)) {
                     $url = $page->getFrontendUrl();
                     $base = rtrim(Environment::get('base'), '/');
                     $this->Template->action = $base . '/' . ltrim($url, '/');
+                    $this->logError('action_from_cmf_target', [ 'cmf_target' => (int) $this->cmf_target, 'action' => $this->Template->action ]);
+                    $lockedAction = true;
+                }
+            } catch (\Throwable $e) {}
+        } elseif (!empty($this->cm_memberlist_pg)) {
+            try {
+                if ($page = PageModel::findByPk((int) $this->cm_memberlist_pg)) {
+                    $url = $page->getFrontendUrl();
+                    $base = rtrim(Environment::get('base'), '/');
+                    $this->Template->action = $base . '/' . ltrim($url, '/');
+                    $this->logError('action_from_cm_memberlist_pg', [ 'cm_memberlist_pg' => (int) $this->cm_memberlist_pg, 'action' => $this->Template->action ]);
                     $lockedAction = true;
                 }
             } catch (\Throwable $e) {}
@@ -59,6 +88,7 @@ class MemberFinderModule extends Module
                     $url = $page->getFrontendUrl();
                     $base = rtrim(Environment::get('base'), '/');
                     $this->Template->action = $base . '/' . ltrim($url, '/');
+                    $this->logError('action_from_jumpTo', [ 'jumpTo' => (int) $this->jumpTo, 'action' => $this->Template->action ]);
                     $lockedAction = true;
                 }
             } catch (\Throwable $e) {}
@@ -129,20 +159,23 @@ class MemberFinderModule extends Module
 
         // Early ensure action targets configured Listenseite (before redirect check)
         try {
-            if (!empty($this->cm_memberlist_pg)) {
-                if ($page = PageModel::findByPk((int) $this->cm_memberlist_pg)) {
-                    $url = $page->getFrontendUrl();
-                    $this->Template->action = $this->buildAbsoluteAction($url);
-                }
-            } elseif (!empty($this->cmf_target)) {
+            if (!empty($this->cmf_target)) {
                 if ($page = PageModel::findByPk((int) $this->cmf_target)) {
                     $url = $page->getFrontendUrl();
                     $this->Template->action = $this->buildAbsoluteAction($url);
+                    $this->logError('ensure_action_cmf_target', [ 'cmf_target' => (int) $this->cmf_target, 'action' => $this->Template->action ]);
+                }
+            } elseif (!empty($this->cm_memberlist_pg)) {
+                if ($page = PageModel::findByPk((int) $this->cm_memberlist_pg)) {
+                    $url = $page->getFrontendUrl();
+                    $this->Template->action = $this->buildAbsoluteAction($url);
+                    $this->logError('ensure_action_cm_memberlist_pg', [ 'cm_memberlist_pg' => (int) $this->cm_memberlist_pg, 'action' => $this->Template->action ]);
                 }
             } elseif (!empty($this->jumpTo)) {
                 if ($page = PageModel::findByPk((int) $this->jumpTo)) {
                     $url = $page->getFrontendUrl();
                     $this->Template->action = $this->buildAbsoluteAction($url);
+                    $this->logError('ensure_action_jumpTo', [ 'jumpTo' => (int) $this->jumpTo, 'action' => $this->Template->action ]);
                 }
             }
         } catch (\Throwable $e) {}
@@ -150,20 +183,28 @@ class MemberFinderModule extends Module
         // DB fallback: read target fields directly from tl_module (in case properties are not mapped)
         try {
             $db = \Contao\Database::getInstance();
-            $res = $db->prepare('SELECT cm_memberlist_pg, cmf_target, jumpTo FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
+            $res = $db->prepare('SELECT cmf_target, cm_memberlist_pg, jumpTo FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
             if ($res->numRows) {
-                $pg = (int) $res->cm_memberlist_pg;
                 $tg = (int) $res->cmf_target;
+                $pg = (int) $res->cm_memberlist_pg;
                 $jt = (int) $res->jumpTo;
-                $targetId = $pg ?: ($tg ?: $jt);
+                $targetId = $tg ?: ($pg ?: $jt);
+                $this->dbg('target_db_fields', [ 'moduleId' => (int) ($this->id ?? 0), 'cm_memberlist_pg' => $pg, 'cmf_target' => $tg, 'jumpTo' => $jt, 'targetId' => $targetId ]);
+                $this->logError('target_db_fields', [ 'moduleId' => (int) ($this->id ?? 0), 'cmf_target' => $tg, 'cm_memberlist_pg' => $pg, 'jumpTo' => $jt, 'targetId' => $targetId ]);
                 if ($targetId) {
                     if ($page = PageModel::findByPk($targetId)) {
                         $url = $page->getFrontendUrl();
                         $this->Template->action = $this->buildAbsoluteAction($url);
+                        $this->dbg('target_resolved', [ 'pageId' => $targetId, 'url' => $url, 'action' => $this->Template->action ]);
+                        $this->logError('target_resolved', [ 'pageId' => $targetId, 'url' => $url, 'action' => $this->Template->action ]);
                     } else {
+                        $this->dbg('target_missing_page', [ 'targetId' => $targetId ]);
+                        $this->logError('target_missing_page', [ 'targetId' => $targetId ]);
                     }
                 }
             } else {
+                $this->dbg('target_db_not_found', [ 'moduleId' => (int) ($this->id ?? 0) ]);
+                $this->logError('target_db_not_found', [ 'moduleId' => (int) ($this->id ?? 0) ]);
             }
         } catch (\Throwable $e) {}
 
@@ -176,36 +217,57 @@ class MemberFinderModule extends Module
         // Consider the form as submitted if any known search parameter is present
         // or if the explicit hidden submission flag is present (to ensure redirect
         // even when users submit without filling any fields).
+        // Consider the form as submitted if common search parameters are present
+        // Include both legacy and new parameter names used across templates
         $hasSearch = (
             Input::get('cm_location') !== null
             || Input::get('cm_country') !== null
             || Input::get('cm_max_dist') !== null
+            || Input::get('cm_max_dist_select') !== null
             || Input::get('for') !== null
-            || Input::get('plzarea') !== null
+            || Input::get('cm_search') !== null
             || Input::get('search') !== null
+            || Input::get('plz') !== null
+            || Input::get('plzarea') !== null
             || Input::get('cmf_submitted') !== null
         );
+        $this->dbg('redirect_check_enter', [
+            'hasSearch' => $hasSearch,
+            'request' => (string) (Environment::get('request') ?? ''),
+            'action'  => (string) ($this->Template->action ?? ''),
+            'query'   => (string) ($_SERVER['QUERY_STRING'] ?? ''),
+            'params'  => array_intersect_key($_GET, array_flip(['plz','plzarea','for','cm_search','cm_max_dist','cm_max_dist_select','cm_country','cm_location','cmf_submitted']))
+        ]);
+        $this->logError('finder_pre_redirect', [
+            'hasSearch' => $hasSearch,
+            'action'    => (string) ($this->Template->action ?? ''),
+            'query'     => (string) ($_SERVER['QUERY_STRING'] ?? ''),
+            'cmf_target' => (int) ($this->cmf_target ?? 0),
+            'cm_memberlist_pg' => (int) ($this->cm_memberlist_pg ?? 0),
+            'jumpTo' => (int) ($this->jumpTo ?? 0),
+        ]);
+        $this->logError('finder_pre_redirect', [
+            'hasSearch' => $hasSearch,
+            'action'    => (string) ($this->Template->action ?? ''),
+            'query'     => (string) ($_SERVER['QUERY_STRING'] ?? ''),
+            'cmf_target' => (int) ($this->cmf_target ?? 0),
+            'cm_memberlist_pg' => (int) ($this->cm_memberlist_pg ?? 0),
+            'jumpTo' => (int) ($this->jumpTo ?? 0),
+        ]);
         if ($hasSearch) {
-            $req = Environment::get('request');
-            $curPath = parse_url($req, PHP_URL_PATH) ?: '';
-            $actPath = parse_url($this->Template->action, PHP_URL_PATH) ?: '';
-            // Normalize: strip preview.php, then normalize leading/trailing slashes
-            $curPath = preg_replace('#^/preview\\.php#', '', $curPath);
-            $actPath = preg_replace('#^/preview\\.php#', '', $actPath);
-            $curNorm = trim($curPath, '/');
-            $actNorm = trim($actPath, '/');
-            if ($actNorm && $curNorm !== $actNorm) {
-                // Build query string and ensure default country is present when configured
-                $qs = $_SERVER['QUERY_STRING'] ?? '';
-                $params = [];
-                if ($qs !== '') { parse_str($qs, $params); }
-                if (!isset($params['cm_country']) && $defaultCountry !== '') {
-                    $params['cm_country'] = $defaultCountry;
-                    $qs = http_build_query($params);
-                }
-                $target = $this->Template->action . ($qs ? ('?' . $qs) : '');
-                \Contao\Controller::redirect($target);
+            // Always navigate to the configured action (Weiterleitungsseite),
+            // appending the current query string and enforcing default country when configured.
+            $qs = $_SERVER['QUERY_STRING'] ?? '';
+            $params = [];
+            if ($qs !== '') { parse_str($qs, $params); }
+            if (!isset($params['cm_country']) && $defaultCountry !== '') {
+                $params['cm_country'] = $defaultCountry;
+                $qs = http_build_query($params);
             }
+            $target = $this->Template->action . ($qs ? ('?' . $qs) : '');
+            $this->dbg('redirect_force', [ 'target' => $target ]);
+            $this->logError('redirect_force', [ 'target' => $target ]);
+            \Contao\Controller::redirect($target);
         }
 
         // Hard-ensure action targets the configured Listenseite (last step)
@@ -409,11 +471,69 @@ class MemberFinderModule extends Module
         $path = '/' . ltrim($relative, '/');
         if (str_starts_with($reqPath, '/preview.php/')) {
             $absolute = $base . '/preview.php' . $path;
-            $this->logDebug('buildAbsoluteAction (preview)', [ 'absolute' => $absolute ]);
+            $this->logError('buildAbsoluteAction_preview', [ 'absolute' => $absolute ]);
             return $absolute;
         }
         $absolute = $base . $path;
-        $this->logDebug('buildAbsoluteAction', [ 'absolute' => $absolute ]);
+        $this->logError('buildAbsoluteAction', [ 'absolute' => $absolute ]);
         return $absolute;
+    }
+
+    private function dbg(string $step, array $context = []): void
+    {
+        // Only log when cm_debug is present to avoid noise
+        if (Input::get('cm_debug') === null) { return; }
+        try {
+            $dir = '';
+            try {
+                $base = \Contao\System::getContainer()->getParameter('kernel.project_dir');
+                // Prefer Symfony 5/6 default var/log
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            } catch (\Throwable $e) {
+                // Fallback one level up from vendor bundle
+                $base = dirname(__DIR__, 6);
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            }
+            if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
+            $file = $dir.'/cm_member_finder.log';
+            $entry = [
+                'ts' => date('c'),
+                'module' => (int) ($this->id ?? 0),
+                'step' => $step,
+                'uri' => (string) (Environment::get('request') ?? ''),
+                'data' => $context,
+            ];
+            @file_put_contents($file, json_encode($entry, JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+            @error_log('cm_finder '+$step+' '+json_encode($entry, JSON_UNESCAPED_SLASHES));
+        } catch (\Throwable $e) { /* ignore */ }
+    }
+
+    private function logError(string $step, array $context = []): void
+    {
+        try {
+            $dir = '';
+            try {
+                $base = \Contao\System::getContainer()->getParameter('kernel.project_dir');
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            } catch (\Throwable $e) {
+                $base = dirname(__DIR__, 6);
+                if (is_dir($base.'/var/log')) { $dir = $base.'/var/log'; }
+                else { $dir = $base.'/var/logs'; }
+            }
+            if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
+            $file = $dir.'/error.log';
+            $entry = [
+                'ts' => date('c'),
+                'module' => (int) ($this->id ?? 0),
+                'step' => $step,
+                'uri' => (string) (Environment::get('request') ?? ''),
+                'data' => $context,
+            ];
+            @file_put_contents($file, json_encode($entry, JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+            @error_log('cm_finder '+$step+' '+json_encode($entry, JSON_UNESCAPED_SLASHES));
+        } catch (\Throwable $e) { /* ignore */ }
     }
 }
