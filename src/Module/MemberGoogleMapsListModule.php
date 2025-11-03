@@ -668,9 +668,12 @@ class MemberGoogleMapsListModule extends Module
             } catch (\Throwable $e) { /* ignore */ }
         }
         $this->Template->googleApiKey = $apiKey;
+        // Debug: note api key presence when cm_debug is enabled
+        $this->dbg('map_key', ['present' => $apiKey !== '' ? 1 : 0]);
         // Ensure bundled CSS for placeholders is included
         if (!isset($GLOBALS['TL_CSS']['websailing_google_map'])) {
-            $GLOBALS['TL_CSS']['websailing_google_map'] = 'bundles/websailinggooglemap/css/google_map.css|static';
+            // Use the actual public bundle path name (see public/bundles)
+            $GLOBALS['TL_CSS']['websailing_google_map'] = 'bundles/googlemap/css/google_map.css|static';
         }
         // Build minimal Google Maps initialization for template compatibility
         // Avoid using undefined $includeMap variable here; check module flag directly
@@ -703,6 +706,12 @@ class MemberGoogleMapsListModule extends Module
         $hasCoords = false;
         foreach ($items as $it) { if (!empty($it['coords'])) { $hasCoords = true; break; } }
         $this->Template->includeMap = $includeMap;
+        // Debug: expose map flags
+        $this->dbg('map_flags', [
+            'includeMap' => (int)$includeMap,
+            'acceptanceRequired' => (int) (bool) ($this->cm_gc_acceptance_required ?? false),
+            'position' => (string) ($this->mapPosition ?? 'bottom')
+        ]);
         $this->Template->mapShowOnEmpty = (bool) $this->cm_map_showmaponempty;
         $this->Template->mapCenterEmpty = (string) $this->cm_map_centerempty;
         $this->Template->mapZoomEmpty = (int) $this->cm_map_zoomempty;

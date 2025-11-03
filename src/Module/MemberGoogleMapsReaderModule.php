@@ -66,6 +66,22 @@ class MemberGoogleMapsReaderModule extends Module
         ];
         $this->Template->hasMap = !empty($row['cm_membergooglemaps_coords']);
 
+        // Resolve Google Maps API key from container parameter first, then fallbacks
+        $apiKey = '';
+        try {
+            $c = \Contao\System::getContainer();
+            if ($c->hasParameter('google_maps_api_key')) {
+                $apiKey = (string) $c->getParameter('google_maps_api_key');
+            }
+            if ($apiKey === '') {
+                if (!empty($_SERVER['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_SERVER['GOOGLE_MAPS_API_KEY']; }
+                elseif (!empty($_ENV['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_ENV['GOOGLE_MAPS_API_KEY']; }
+                elseif (($tmp = getenv('GOOGLE_MAPS_API_KEY')) !== false && $tmp !== '') { $apiKey = (string) $tmp; }
+                elseif ($c->hasParameter('env(GOOGLE_MAPS_API_KEY)')) { $apiKey = (string) $c->getParameter('env(GOOGLE_MAPS_API_KEY)'); }
+            }
+        } catch (\Throwable $e) {}
+        $this->Template->googleApiKey = $apiKey;
+
         // Ensure unified CSS class on all module types of this bundle
         try {
             $cls = (string) ($this->Template->class ?? '');

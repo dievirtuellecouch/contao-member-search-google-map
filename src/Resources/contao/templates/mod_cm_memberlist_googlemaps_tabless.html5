@@ -97,73 +97,24 @@
         }
     }
   ?>
-  <div id="<?= $mapId ?>" style="width:100%;height:<?= htmlspecialchars($heightCss, ENT_QUOTES, 'UTF-8') ?>;"></div>
-  <script<?= $nonce ? ' nonce="'.$nonce.'"' : '' ?>>
-    (function(){
-      function hasConsent(){ return document.cookie.indexOf('cm_googlemaps=1') !== -1; }
-      function setConsent(){ document.cookie = 'cm_googlemaps=1;path=/;max-age='+(365*24*3600); }
-      var items = <?= json_encode($this->items, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
-      var points = [];
-      for (var i=0;i<items.length;i++){
-        if (!items[i].coords) continue;
-        var parts = items[i].coords.split(',');
-        if (parts.length < 2) continue;
-        var lat = parseFloat(parts[0]);
-        var lng = parseFloat(parts[1]);
-        if (isNaN(lat) || isNaN(lng)) continue;
-        var name = (items[i].company && items[i].company.trim()) ? items[i].company : ((items[i].firstname||'')+' '+(items[i].lastname||''));
-        var html = '<strong>'+ (name||'') +'</strong><br>'
-                 + (items[i].street? items[i].street+'<br>' : '')
-                 + (items[i].postal? items[i].postal+' ' : '') + (items[i].city||'');
-        if (items[i].website) {
-          var url = /^https?:\/\//.test(items[i].website)? items[i].website : ('http://'+items[i].website);
-          var disp = url.replace(/^https?:\/\//i, '');
-          disp = disp.replace(/\/$/, '');
-          html += '<br><a href="'+url+'" target="_blank" rel="noopener">'+disp+'</a>';
-        }
-        points.push({lat: lat, lng: lng, title: name||'', html: html});
-      }
-      var center = points.length ? {lat: points[0].lat, lng: points[0].lng} : null;
-      <?php if (!empty($this->mapShowOnEmpty) && !empty($this->mapCenterEmpty)): ?>
-      if (!center) {
-        try {
-          var c = '<?= addslashes((string) $this->mapCenterEmpty) ?>'.split(',');
-          if (c.length >= 2) center = {lat: parseFloat(c[0]), lng: parseFloat(c[1])};
-        } catch(e) {}
-      }
-      <?php endif; ?>
-      function loadMap(){
-        var apiKey = '<?= htmlspecialchars((string)($this->googleApiKey ?? ''), ENT_QUOTES, 'UTF-8') ?>';
-        if (!center) { center = {lat: 51.0, lng: 10.0}; }
-        var cb = '__cmInit_<?= (int)($this->id ?? 0) ?>_top';
-        window[cb] = function(){
-          var el = document.getElementById('<?= $mapId ?>');
-          if (!el || !window.google || !google.maps) return;
-          var map = new google.maps.Map(el, {zoom: <?= (int)($this->mapZoomEmpty ?: 6) ?>, center: center});
-          var iw = new google.maps.InfoWindow();
-          points.forEach(function(p){
-            var m = new google.maps.Marker({position: {lat:p.lat,lng:p.lng}, map: map, title: p.title});
-            if (p.html) m.addListener('click', function(){ iw.setContent(p.html); iw.open(map, m); });
-          });
-        };
-        var s = document.createElement('script');
-        s.src = 'https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(apiKey)+'&libraries=marker&v=weekly&loading=async&callback='+cb;
-        s.async = true; s.defer = true; document.body.appendChild(s);
-      }
-      <?php if (!empty($this->acceptanceRequired)): ?>
-      if (!hasConsent()) {
-        var div = document.createElement('div');
-        div.className = 'gm-placeholder';
-        div.style.cssText = 'display:flex;align-items:center;justify-content:center;text-align:center;padding:1rem;';
-        var txt = <?= json_encode($this->acceptanceText) ?>;
-        div.innerHTML = '<div>'+ txt + '<br><a class="module-cookiebar-opener ccb-trigger" href="javascript:;" rel="noreferrer noopener">Cookies zurücksetzen</a></div>';
-        var host = document.getElementById('<?= $this->escape($mapId) ?>'); if (host && host.parentNode) host.parentNode.insertBefore(div, host);
-      } else { loadMap(); }
-      <?php else: ?>
-      loadMap();
-      <?php endif; ?>
-    })();
-  </script>
+  <div class="cm-map-wrap" style="height:<?= htmlspecialchars($heightCss, ENT_QUOTES, 'UTF-8') ?>">
+    <div class="gm-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;text-align:center;padding:1rem;">
+      <div>
+        <?= $this->acceptanceText ?>
+        <br>
+        <a class="module-cookiebar-opener ccb-trigger" href="javascript:;" rel="noreferrer noopener">Cookies zurücksetzen</a>
+      </div>
+    </div>
+    <div
+      class="cm-map"
+      id="<?= $mapId ?>"
+      data-api-key="<?= htmlspecialchars((string)($this->googleApiKey ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+      data-markers='<?= $this->markersJson ?: '[]' ?>'
+      data-center="<?= htmlspecialchars((string)($this->mapCenterEmpty ?: ''), ENT_QUOTES, 'UTF-8') ?>"
+      data-zoom="<?= (int)($this->mapZoomEmpty ?: 6) ?>"
+      style="height:100%; width:100%"
+    ></div>
+  </div>
 <?php endif; ?>
 
 <div id="memberlist" class="memberlist">
@@ -331,71 +282,22 @@
         }
     }
   ?>
-  <div id="<?= $mapId ?>" style="width:100%;height:<?= htmlspecialchars($heightCss, ENT_QUOTES, 'UTF-8') ?>;"></div>
-  <script<?= $nonce ? ' nonce="'.$nonce.'"' : '' ?>>
-    (function(){
-      function hasConsent(){ return document.cookie.indexOf('cm_googlemaps=1') !== -1; }
-      function setConsent(){ document.cookie = 'cm_googlemaps=1;path=/;max-age='+(365*24*3600); }
-      var items = <?= json_encode($this->items, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
-      var points = [];
-      for (var i=0;i<items.length;i++){
-        if (!items[i].coords) continue;
-        var parts = items[i].coords.split(',');
-        if (parts.length < 2) continue;
-        var lat = parseFloat(parts[0]);
-        var lng = parseFloat(parts[1]);
-        if (isNaN(lat) || isNaN(lng)) continue;
-        var name = (items[i].company && items[i].company.trim()) ? items[i].company : ((items[i].firstname||'')+' '+(items[i].lastname||''));
-        var html = '<strong>'+ (name||'') +'</strong><br>'
-                 + (items[i].street? items[i].street+'<br>' : '')
-                 + (items[i].postal? items[i].postal+' ' : '') + (items[i].city||'');
-        if (items[i].website) {
-          var url = /^https?:\/\//.test(items[i].website)? items[i].website : ('http://'+items[i].website);
-          var disp = url.replace(/^https?:\/\//i, '');
-          disp = disp.replace(/\/$/, '');
-          html += '<br><a href="'+url+'" target="_blank" rel="noopener">'+disp+'</a>';
-        }
-        points.push({lat: lat, lng: lng, title: name||'', html: html});
-      }
-      var center = points.length ? {lat: points[0].lat, lng: points[0].lng} : null;
-      <?php if (!empty($this->mapShowOnEmpty) && !empty($this->mapCenterEmpty)): ?>
-      if (!center) {
-        try {
-          var c = '<?= addslashes((string) $this->mapCenterEmpty) ?>'.split(',');
-          if (c.length >= 2) center = {lat: parseFloat(c[0]), lng: parseFloat(c[1])};
-        } catch(e) {}
-      }
-      <?php endif; ?>
-      function loadMap(){
-        var apiKey = '<?= htmlspecialchars((string)($this->googleApiKey ?? ''), ENT_QUOTES, 'UTF-8') ?>';
-        if (!center) { center = {lat: 51.0, lng: 10.0}; }
-        var cb = '__cmInit_<?= (int)($this->id ?? 0) ?>_bot';
-        window[cb] = function(){
-          var el = document.getElementById('<?= $mapId ?>');
-          if (!el || !window.google || !google.maps) return;
-          var map = new google.maps.Map(el, {zoom: <?= (int)($this->mapZoomEmpty ?: 6) ?>, center: center});
-          var iw = new google.maps.InfoWindow();
-          points.forEach(function(p){
-            var m = new google.maps.Marker({position: {lat:p.lat,lng:p.lng}, map: map, title: p.title});
-            if (p.html) m.addListener('click', function(){ iw.setContent(p.html); iw.open(map, m); });
-          });
-        };
-        var s = document.createElement('script');
-        s.src = 'https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(apiKey)+'&libraries=marker&v=weekly&loading=async&callback='+cb;
-        s.async = true; s.defer = true; document.body.appendChild(s);
-      }
-      <?php if (!empty($this->acceptanceRequired)): ?>
-      if (!hasConsent()) {
-        var div = document.createElement('div');
-        div.className = 'gm-placeholder';
-        div.style.cssText = 'display:flex;align-items:center;justify-content:center;text-align:center;padding:1rem;';
-        var txt = <?= json_encode($this->acceptanceText) ?>;
-        div.innerHTML = '<div>'+ txt + '<br><a class="module-cookiebar-opener ccb-trigger" href="javascript:;" rel="noreferrer noopener">Cookies zurücksetzen</a></div>';
-        var host = document.getElementById('<?= $this->escape($mapId) ?>'); if (host && host.parentNode) host.parentNode.insertBefore(div, host);
-      } else { loadMap(); }
-      <?php else: ?>
-      loadMap();
-      <?php endif; ?>
-    })();
-  </script>
+  <div class="cm-map-wrap" style="height:<?= htmlspecialchars($heightCss, ENT_QUOTES, 'UTF-8') ?>">
+    <div class="gm-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;text-align:center;padding:1rem;">
+      <div>
+        <?= $this->acceptanceText ?>
+        <br>
+        <a class="module-cookiebar-opener ccb-trigger" href="javascript:;" rel="noreferrer noopener">Cookies zurücksetzen</a>
+      </div>
+    </div>
+    <div
+      class="cm-map"
+      id="<?= $mapId ?>"
+      data-api-key="<?= htmlspecialchars((string)($this->googleApiKey ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+      data-markers='<?= $this->markersJson ?: '[]' ?>'
+      data-center="<?= htmlspecialchars((string)($this->mapCenterEmpty ?: ''), ENT_QUOTES, 'UTF-8') ?>"
+      data-zoom="<?= (int)($this->mapZoomEmpty ?: 6) ?>"
+      style="height:100%; width:100%"
+    ></div>
+  </div>
 <?php endif; ?>
