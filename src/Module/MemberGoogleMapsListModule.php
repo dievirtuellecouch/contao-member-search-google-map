@@ -14,7 +14,8 @@ use Contao\StringUtil;
 
 class MemberGoogleMapsListModule extends Module
 {
-    protected $strTemplate = 'mod_cm_memberlist_simple';
+    // Use the tableless list template as unified default for all module types
+    protected $strTemplate = 'mod_cm_memberlist_googlemaps_tabless';
     private bool $cmRadiusUsed = false;
     private array $cmDebug = [];
     private bool $cmDebugEnabled = false;
@@ -47,14 +48,17 @@ class MemberGoogleMapsListModule extends Module
                 $res = $db->prepare('SELECT map_lsttemplate FROM tl_module WHERE id=?')->limit(1)->execute((int) $this->id);
                 if ($res->numRows) { $chosen = (string) $res->map_lsttemplate; }
             }
-            // Normalize historical typo/plural
-            if ($chosen === 'mod_cm_memberlist_googlemaps_tables') { $chosen = 'mod_cm_memberlist_googlemaps'; }
-            if ($chosen === 'mod_cm_memberlist_googlemaps_table') { $chosen = 'mod_cm_memberlist_googlemaps'; }
+            // Normalize historical names to the tableless variant
+            if ($chosen === 'mod_cm_memberlist_googlemaps_tables') { $chosen = 'mod_cm_memberlist_googlemaps_tabless'; }
+            if ($chosen === 'mod_cm_memberlist_googlemaps_table')  { $chosen = 'mod_cm_memberlist_googlemaps_tabless'; }
+            if ($chosen === 'mod_cm_memberlist_googlemaps')        { $chosen = 'mod_cm_memberlist_googlemaps_tabless'; }
             if ($chosen === '') {
-                // Fallback based on tableless flag
-                $chosen = ((bool) $this->cm_membergooglemaps_tableless) ? 'mod_cm_memberlist_googlemaps_tabless' : 'mod_cm_memberlist_googlemaps';
+                // Always use the tableless template by default
+                $chosen = 'mod_cm_memberlist_googlemaps_tabless';
             }
-            $this->strTemplate = $chosen;
+            // Enforce unified tableless template regardless of selection
+            $this->strTemplate = 'mod_cm_memberlist_googlemaps_tabless';
+            try { $this->logProbe('template_selected', ['chosen' => $this->strTemplate, 'moduleId' => (int)($this->id ?? 0)]); } catch (\Throwable $e) {}
         } catch (\Throwable $e) {
             // keep default template
         }
@@ -149,6 +153,8 @@ class MemberGoogleMapsListModule extends Module
         // Decide whether to suppress results initially but still render the search form
         $showAllOnEmpty = (bool) ($this->cm_memberlist_showall_on_empty ?? false);
         $suppressInitial = (!$hasAnyFilter && !$showAllOnEmpty);
+        // Expose whether a search was used to templates (for placing a repeated form below results)
+        $this->Template->searchUsed = $hasAnyFilter;
 
         // Inputs
         $postal = trim((string) (Input::get('plz') ?? (Input::get('plzarea') ?? '')));
@@ -305,6 +311,8 @@ class MemberGoogleMapsListModule extends Module
             $wantPostalFilter = true;
             $postalLikeValue = $postal.'%';
         }
+        // Expose whether PLZ search (plz/plzarea) was used for controlling distance output in templates
+        $this->Template->plzSearchUsed = (($plzarea !== '') || ($postal !== ''));
         // Note: country filtering handled after distance decision as well.
         
         // NOTE: textual address LIKE filters will be applied after we decide about radius filtering
@@ -346,7 +354,7 @@ class MemberGoogleMapsListModule extends Module
 
         // SELECT (always include address columns so templates can render city/postal regardless of config)
         // Ensure avatar, address and person name columns are selected so templates can render them regardless of field config
-        $baseCols = ['id','alias','cm_membergooglemaps_coords','groups','avatar','street','postal','city','country','firstname','lastname','LeistungenAllgemein','Lieferant','Sachverstaendiger'];
+        $baseCols = ['id','alias','cm_membergooglemaps_coords','groups','avatar','street','postal','city','country','firstname','lastname','phone','fax','email','website','LeistungenAllgemein','Lieferant','Sachverstaendiger'];
         // Always include configured search fields in SELECT so they are available for output when address form is enabled
         $select = array_unique(array_merge($baseCols, $displayFields, (array)$searchFieldsConfigured));
         $selectSql = implode(',', array_filter(array_map(fn($f) => preg_match('~^[a-z0-9_]+$~i', $f) ? $f : null, $select)));
@@ -556,8 +564,9 @@ class MemberGoogleMapsListModule extends Module
                                 }
                             }
                         }
-                        // Label without scheme
+                        // Label without scheme and without trailing slash
                         $label = preg_replace('~^https?://~i', '', $rawSite);
+                        $label = rtrim($label, '/');
                         $item['website'] = $label ?: $rawSite;
                         $item['websiteUrl'] = $href;
                     } else {
@@ -565,6 +574,12 @@ class MemberGoogleMapsListModule extends Module
                     }
                 } else {
                     $item[$f] = $val;
+                }
+                }
+            // Ensure commonly used fields are present even if not part of displayFields
+            foreach (['firstname','lastname','phone','fax','email','website'] as $ensure) {
+                if (!array_key_exists($ensure, $item)) {
+                    $item[$ensure] = (string) ($row[$ensure] ?? '');
                 }
             }
             // Combine selected service groups into one output under "Leistungen Allgemein"
@@ -626,6 +641,24 @@ class MemberGoogleMapsListModule extends Module
             elseif (($tmp = getenv('GOOGLE_MAPS_API_KEY')) !== false && $tmp !== '') { $apiKey = (string) $tmp; }
             elseif (\Contao\System::getContainer()->hasParameter('env(GOOGLE_MAPS_API_KEY)')) { $apiKey = (string) \Contao\System::getContainer()->getParameter('env(GOOGLE_MAPS_API_KEY)'); }
         } catch (\Throwable $e) {}
+        // Fallback: parse .env.local or .env if runtime env vars are not exposed (e.g., prod)
+        if ($apiKey === '') {
+            try {
+                $base = \Contao\System::getContainer()->getParameter('kernel.project_dir');
+                foreach (['/.env.local','/.env'] as $rel) {
+                    $path = $base.$rel;
+                    if (!is_file($path) || !is_readable($path)) { continue; }
+                    $lines = @file($path, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) ?: [];
+                    foreach ($lines as $line) {
+                        if (preg_match('~^\s*#~', $line)) { continue; }
+                        if (preg_match('~^\s*GOOGLE_MAPS_API_KEY\s*=\s*"?([^"\r\n#]+)~', $line, $m)) {
+                            $apiKey = trim($m[1]);
+                            break 2;
+                        }
+                    }
+                }
+            } catch (\Throwable $e) { /* ignore */ }
+        }
         $this->Template->googleApiKey = $apiKey;
         // Ensure bundled CSS for placeholders is included
         if (!isset($GLOBALS['TL_CSS']['websailing_google_map'])) {
@@ -793,27 +826,7 @@ class MemberGoogleMapsListModule extends Module
                 $fieldInputsHtml .= '<input type="text" class="cm_sf_input" name="cm_'.htmlspecialchars($sf, ENT_QUOTES).'" id="cm_'.htmlspecialchars($sf, ENT_QUOTES).'" value="'.$val.'">';
             }
         }
-        // Append service group checkboxes (always available)
-        try { Controller::loadLanguageFile('tl_member'); Controller::loadDataContainer('tl_member'); } catch (\Throwable $e) {}
-        $buildGroup = static function(string $field, string $name, string $title) {
-            $opts = (array) ($GLOBALS['TL_DCA']['tl_member']['fields'][$field]['options'] ?? []);
-            if (!$opts) { return ''; }
-            $sel = (array) (Input::get($name) ?? []);
-            $html = '<fieldset class="cm-filter cm-filter-'.$name.'"><legend>'.htmlspecialchars($title, ENT_QUOTES).'</legend>';
-            foreach ($opts as $opt) {
-                $id = $name.'_'.md5($opt);
-                $checked = in_array($opt, $sel, true) ? ' checked' : '';
-                $html .= '<div class="checkbox_container">'
-                    .'<input type="checkbox" name="'.$name.'[]" id="'.$id.'" value="'.htmlspecialchars($opt, ENT_QUOTES).'"'.$checked.'>'
-                    .'<label for="'.$id.'">'.htmlspecialchars($opt, ENT_QUOTES).'</label>'
-                    .'</div>';
-            }
-            $html .= '</fieldset>';
-            return $html;
-        };
-        $fieldInputsHtml .= $buildGroup('LeistungenAllgemein', 'lga', 'Leistungen Allgemein');
-        $fieldInputsHtml .= $buildGroup('Lieferant', 'lieferant', 'Fördermitglied/Lieferant');
-        $fieldInputsHtml .= $buildGroup('Sachverstaendiger', 'sach', 'Sachverständiger');
+        // Do not append service group checkboxes in the request form
         $this->Template->field_inputs = $fieldInputsHtml;
         // Build unified search inputs block (non-address fields) in configured order
         $searchInputsHtml = '';
@@ -902,6 +915,14 @@ class MemberGoogleMapsListModule extends Module
             $tpl->infoTemplate = (string) ($this->map_infotemplate ?? '');
             $this->Template = $tpl;
         }
+
+        // Ensure unified CSS class on all module types of this bundle
+        try {
+            $cls = (string) ($this->Template->class ?? '');
+            if (strpos($cls, 'mod_cm_memberfinder') === false) {
+                $this->Template->class = trim($cls.' mod_cm_memberfinder');
+            }
+        } catch (\Throwable $e) { /* ignore */ }
 
         // Pagination
         $perPage = (int) ($this->perPage ?: 0);

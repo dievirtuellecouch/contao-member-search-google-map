@@ -368,30 +368,8 @@ class MemberFinderModule extends Module
         $this->Template->lbl_postal = 'PLZ';
         $this->Template->lbl_city   = 'Ort';
 
-        // Build separate checkbox groups for member service fields
-        // LeistungenAllgemein, Lieferant, Sachverstaendiger
-        try { Controller::loadLanguageFile('tl_member'); Controller::loadDataContainer('tl_member'); } catch (\Throwable $e) {}
-        $buildGroup = static function(string $field, string $name, string $title) {
-            $opts = (array) ($GLOBALS['TL_DCA']['tl_member']['fields'][$field]['options'] ?? []);
-            if (!$opts) { return ''; }
-            $sel = (array) (Input::get($name) ?? []);
-            $html = '<fieldset class="cm-filter cm-filter-'.$name.'"><legend>'.htmlspecialchars($title, ENT_QUOTES).'</legend>';
-            foreach ($opts as $opt) {
-                $id = $name.'_'.md5($opt);
-                $checked = in_array($opt, $sel, true) ? ' checked' : '';
-                $html .= '<div class="checkbox_container">'
-                    .'<input type="checkbox" name="'.$name.'[]" id="'.$id.'" value="'.htmlspecialchars($opt, ENT_QUOTES).'"'.$checked.'>'
-                    .'<label for="'.$id.'">'.htmlspecialchars($opt, ENT_QUOTES).'</label>'
-                    .'</div>';
-            }
-            $html .= '</fieldset>';
-            return $html;
-        };
-        $filtersHtml = '';
-        $filtersHtml .= $buildGroup('LeistungenAllgemein', 'lga', 'Leistungen Allgemein');
-        $filtersHtml .= $buildGroup('Lieferant', 'lieferant', 'Fördermitglied/Lieferant');
-        $filtersHtml .= $buildGroup('Sachverstaendiger', 'sach', 'Sachverständiger');
-        $this->Template->filter_fields = $filtersHtml;
+        // Remove service group filters in finder request form
+        $this->Template->filter_fields = '';
         // Country select (match original name cm_country, default de)
         // Determine selected country: respect explicit input; if no preset configured, leave empty
         $selected = strtolower(trim((string) (Input::get('cm_country') ?? ($defaultCountry !== '' ? $defaultCountry : ''))));

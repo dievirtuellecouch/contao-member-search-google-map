@@ -65,5 +65,13 @@ class MemberGoogleMapsReaderModule extends Module
             'expert' => $GLOBALS['TL_LANG']['tl_member']['services_expert_ref'] ?? [],
         ];
         $this->Template->hasMap = !empty($row['cm_membergooglemaps_coords']);
+
+        // Ensure unified CSS class on all module types of this bundle
+        try {
+            $cls = (string) ($this->Template->class ?? '');
+            if (strpos($cls, 'mod_cm_memberfinder') === false) {
+                $this->Template->class = trim($cls.' mod_cm_memberfinder');
+            }
+        } catch (\Throwable $e) { /* ignore */ }
     }
 }
