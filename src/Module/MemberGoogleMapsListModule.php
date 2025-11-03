@@ -636,10 +636,18 @@ class MemberGoogleMapsListModule extends Module
         // Provide Google Maps API key to templates (multi-source resolution)
         $apiKey = '';
         try {
-            if (!empty($_SERVER['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_SERVER['GOOGLE_MAPS_API_KEY']; }
-            elseif (!empty($_ENV['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_ENV['GOOGLE_MAPS_API_KEY']; }
-            elseif (($tmp = getenv('GOOGLE_MAPS_API_KEY')) !== false && $tmp !== '') { $apiKey = (string) $tmp; }
-            elseif (\Contao\System::getContainer()->hasParameter('env(GOOGLE_MAPS_API_KEY)')) { $apiKey = (string) \Contao\System::getContainer()->getParameter('env(GOOGLE_MAPS_API_KEY)'); }
+            // Prefer Symfony container parameter which evaluates env in prod
+            $c = \Contao\System::getContainer();
+            if ($c->hasParameter('google_maps_api_key')) {
+                $apiKey = (string) $c->getParameter('google_maps_api_key');
+            }
+            // Fallbacks if container param is not set
+            if ($apiKey === '') {
+                if (!empty($_SERVER['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_SERVER['GOOGLE_MAPS_API_KEY']; }
+                elseif (!empty($_ENV['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_ENV['GOOGLE_MAPS_API_KEY']; }
+                elseif (($tmp = getenv('GOOGLE_MAPS_API_KEY')) !== false && $tmp !== '') { $apiKey = (string) $tmp; }
+                elseif ($c->hasParameter('env(GOOGLE_MAPS_API_KEY)')) { $apiKey = (string) $c->getParameter('env(GOOGLE_MAPS_API_KEY)'); }
+            }
         } catch (\Throwable $e) {}
         // Fallback: parse .env.local or .env if runtime env vars are not exposed (e.g., prod)
         if ($apiKey === '') {
@@ -665,7 +673,8 @@ class MemberGoogleMapsListModule extends Module
             $GLOBALS['TL_CSS']['websailing_google_map'] = 'bundles/websailinggooglemap/css/google_map.css|static';
         }
         // Build minimal Google Maps initialization for template compatibility
-        if ($includeMap && $apiKey) {
+        // Avoid using undefined $includeMap variable here; check module flag directly
+        if ((bool) ($this->cm_map_onlist ?? false) && $apiKey) {
             $mapId = 'memberlistmap_'.(int)($this->id ?? 0);
             $this->Template->mapID = $mapId;
             $heightCss = $this->Template->mapHeight ?: '400px';
@@ -960,10 +969,14 @@ class MemberGoogleMapsListModule extends Module
         $apiKey = '';
         $source = null;
         try {
-            if (!empty($_SERVER['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_SERVER['GOOGLE_MAPS_API_KEY']; $source = 'SERVER'; }
-            elseif (!empty($_ENV['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_ENV['GOOGLE_MAPS_API_KEY']; $source = 'ENV'; }
-            elseif (($tmp = getenv('GOOGLE_MAPS_API_KEY')) !== false && $tmp !== '') { $apiKey = (string) $tmp; $source = 'getenv'; }
-            elseif (\Contao\System::getContainer()->hasParameter('env(GOOGLE_MAPS_API_KEY)')) { $apiKey = (string) \Contao\System::getContainer()->getParameter('env(GOOGLE_MAPS_API_KEY)'); $source = 'container'; }
+            $c = \Contao\System::getContainer();
+            if ($c->hasParameter('google_maps_api_key')) { $apiKey = (string) $c->getParameter('google_maps_api_key'); $source = 'container_param'; }
+            if ($apiKey === '') {
+                if (!empty($_SERVER['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_SERVER['GOOGLE_MAPS_API_KEY']; $source = 'SERVER'; }
+                elseif (!empty($_ENV['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_ENV['GOOGLE_MAPS_API_KEY']; $source = 'ENV'; }
+                elseif (($tmp = getenv('GOOGLE_MAPS_API_KEY')) !== false && $tmp !== '') { $apiKey = (string) $tmp; $source = 'getenv'; }
+                elseif ($c->hasParameter('env(GOOGLE_MAPS_API_KEY)')) { $apiKey = (string) $c->getParameter('env(GOOGLE_MAPS_API_KEY)'); $source = 'container_env'; }
+            }
         } catch (\Throwable $e) {}
         if (!$apiKey) {
             $this->dbg('geocode_skip', [ 'reason' => 'no_api_key' ]);
