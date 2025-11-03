@@ -24,6 +24,11 @@
     ?>
     <form action="<?= $resolvedAction; ?>" method="get">
       <input type="hidden" name="cmf_submitted" value="1">
+      <?php if (!empty($this->filter_fields)): ?>
+      <div class="mgroupfilter">
+        <?= $this->filter_fields; ?>
+      </div>
+      <?php endif; ?>
       <div class="formbody">
         <?php if ($this->fieldsearch && !$this->multifieldsearch): ?>
           <label for="ctrl_search" class="notinvisible"><?= $this->fields_label; ?></label>
@@ -153,9 +158,10 @@
             <a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars(preg_replace('~^https?://~','',$url), ENT_QUOTES, 'UTF-8') ?>" target="_blank"><?= htmlspecialchars(preg_replace('~^https?://~','',$url), ENT_QUOTES, 'UTF-8') ?></a>
           <?php endif; ?>
         </p>
-        <p class="body col_11"><?= htmlspecialchars((string)($it['LeistungenAllgemein'] ?? ''), ENT_QUOTES, 'UTF-8') ?></p>
-        <p class="body col_12"><?= ($it['Lieferant'] ?? '') !== '' ? htmlspecialchars((string)$it['Lieferant'], ENT_QUOTES, 'UTF-8') : '-' ?></p>
-        <p class="body col_13"><?= ($it['Sachverstaendiger'] ?? '') !== '' ? htmlspecialchars((string)$it['Sachverstaendiger'], ENT_QUOTES, 'UTF-8') : '-' ?></p>
+        <?php if (!empty($this->hasServiceFields)): ?>
+          <p class="body col_11"><?= htmlspecialchars((string)($it['LeistungenAllgemein'] ?? ''), ENT_QUOTES, 'UTF-8') ?></p>
+        <?php endif; ?>
+        <?php /* Lieferant und Sachverständiger werden im Feld Leistungen Allgemein mit ausgegeben */ ?>
         <?php if (!empty($this->linkRoute) && !empty($it['routeUrl'])): ?>
           <p class="body col_16 col_last">
             <a onclick="window.open(this.href); return false;" href="<?= htmlspecialchars($it['routeUrl'], ENT_QUOTES, 'UTF-8') ?>">Route</a>

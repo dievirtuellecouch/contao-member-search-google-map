@@ -267,6 +267,32 @@ class MemberGoogleMapsListModule extends Module
             $this->dbg('search_per_field_or', [ 'fields' => $searchFields ]);
         }
 
+        // Checkbox group filters for Leistungen (as separate groups)
+        $groupFilters = [];
+        $groupValues = [];
+        $lgaSel = (array) (Input::get('lga') ?? []);
+        if ($lgaSel) {
+            $ors = [];
+            foreach ($lgaSel as $opt) { $ors[] = 'LeistungenAllgemein LIKE ?'; $groupValues[] = '%'.$opt.'%'; }
+            if ($ors) { $groupFilters[] = '('.implode(' OR ', $ors).')'; }
+        }
+        $lieferantSel = (array) (Input::get('lieferant') ?? []);
+        if ($lieferantSel) {
+            $ors = [];
+            foreach ($lieferantSel as $opt) { $ors[] = 'Lieferant LIKE ?'; $groupValues[] = '%'.$opt.'%'; }
+            if ($ors) { $groupFilters[] = '('.implode(' OR ', $ors).')'; }
+        }
+        $sachSel = (array) (Input::get('sach') ?? []);
+        if ($sachSel) {
+            $ors = [];
+            foreach ($sachSel as $opt) { $ors[] = 'Sachverstaendiger LIKE ?'; $groupValues[] = '%'.$opt.'%'; }
+            if ($ors) { $groupFilters[] = '('.implode(' OR ', $ors).')'; }
+        }
+        if ($groupFilters) {
+            $where .= ' AND '.implode(' AND ', $groupFilters);
+            foreach ($groupValues as $gv) { $values[] = $gv; }
+        }
+
         // Postal filter: decided later based on whether distance search is active
         $plzarea = trim((string) (Input::get('plzarea') ?? ''));
         $plzdigits = (int) ($this->cm_memberlist_plznumberdigits ?? 0);
@@ -306,9 +332,21 @@ class MemberGoogleMapsListModule extends Module
             $displayFields = array_values(array_unique(array_merge($displayFields, $searchFieldsConfigured)));
         }
 
+        // Determine which service groups are selected for output in the module
+        $serviceFieldsSelected = array_values(array_intersect($displayFields, ['LeistungenAllgemein','Lieferant','Sachverstaendiger']));
+        $hasAnyService = !empty($serviceFieldsSelected);
+        // Collapse service groups into a single visible field "LeistungenAllgemein"
+        if ($hasAnyService) {
+            $displayFields = array_values(array_unique(array_merge(
+                array_diff($displayFields, ['Lieferant','Sachverstaendiger']),
+                ['LeistungenAllgemein']
+            )));
+        }
+        $this->Template->hasServiceFields = $hasAnyService;
+
         // SELECT (always include address columns so templates can render city/postal regardless of config)
         // Ensure avatar, address and person name columns are selected so templates can render them regardless of field config
-        $baseCols = ['id','alias','cm_membergooglemaps_coords','groups','avatar','street','postal','city','country','firstname','lastname'];
+        $baseCols = ['id','alias','cm_membergooglemaps_coords','groups','avatar','street','postal','city','country','firstname','lastname','LeistungenAllgemein','Lieferant','Sachverstaendiger'];
         // Always include configured search fields in SELECT so they are available for output when address form is enabled
         $select = array_unique(array_merge($baseCols, $displayFields, (array)$searchFieldsConfigured));
         $selectSql = implode(',', array_filter(array_map(fn($f) => preg_match('~^[a-z0-9_]+$~i', $f) ? $f : null, $select)));
@@ -529,6 +567,31 @@ class MemberGoogleMapsListModule extends Module
                     $item[$f] = $val;
                 }
             }
+            // Combine selected service groups into one output under "Leistungen Allgemein"
+            try {
+                $all = [];
+                $groupsToCombine = $serviceFieldsSelected ?: [];
+                foreach ($groupsToCombine as $gf) {
+                    $raw = $row[$gf] ?? '';
+                    $arr = [];
+                    if (is_string($raw) && strpos($raw, 'a:') === 0) {
+                        $arr = StringUtil::deserialize($raw, true);
+                    } elseif (is_string($raw) && $raw !== '') {
+                        // Fallback: comma separated string
+                        $arr = array_filter(array_map('trim', explode(',', $raw)), 'strlen');
+                    } elseif (is_array($raw)) {
+                        $arr = $raw;
+                    }
+                    foreach ((array)$arr as $v) {
+                        if ($v !== '') { $all[] = (string) $v; }
+                    }
+                }
+                $all = array_values(array_unique($all));
+                $item['LeistungenAllgemein'] = $all ? implode(', ', $all) : '';
+                // Clear the other group outputs so the templates only show the combined list
+                $item['Lieferant'] = '';
+                $item['Sachverstaendiger'] = '';
+            } catch (\Throwable $e) { /* ignore combine errors */ }
                 $items[] = $item;
             }
         }
@@ -730,6 +793,27 @@ class MemberGoogleMapsListModule extends Module
                 $fieldInputsHtml .= '<input type="text" class="cm_sf_input" name="cm_'.htmlspecialchars($sf, ENT_QUOTES).'" id="cm_'.htmlspecialchars($sf, ENT_QUOTES).'" value="'.$val.'">';
             }
         }
+        // Append service group checkboxes (always available)
+        try { Controller::loadLanguageFile('tl_member'); Controller::loadDataContainer('tl_member'); } catch (\Throwable $e) {}
+        $buildGroup = static function(string $field, string $name, string $title) {
+            $opts = (array) ($GLOBALS['TL_DCA']['tl_member']['fields'][$field]['options'] ?? []);
+            if (!$opts) { return ''; }
+            $sel = (array) (Input::get($name) ?? []);
+            $html = '<fieldset class="cm-filter cm-filter-'.$name.'"><legend>'.htmlspecialchars($title, ENT_QUOTES).'</legend>';
+            foreach ($opts as $opt) {
+                $id = $name.'_'.md5($opt);
+                $checked = in_array($opt, $sel, true) ? ' checked' : '';
+                $html .= '<div class="checkbox_container">'
+                    .'<input type="checkbox" name="'.$name.'[]" id="'.$id.'" value="'.htmlspecialchars($opt, ENT_QUOTES).'"'.$checked.'>'
+                    .'<label for="'.$id.'">'.htmlspecialchars($opt, ENT_QUOTES).'</label>'
+                    .'</div>';
+            }
+            $html .= '</fieldset>';
+            return $html;
+        };
+        $fieldInputsHtml .= $buildGroup('LeistungenAllgemein', 'lga', 'Leistungen Allgemein');
+        $fieldInputsHtml .= $buildGroup('Lieferant', 'lieferant', 'Fördermitglied/Lieferant');
+        $fieldInputsHtml .= $buildGroup('Sachverstaendiger', 'sach', 'Sachverständiger');
         $this->Template->field_inputs = $fieldInputsHtml;
         // Build unified search inputs block (non-address fields) in configured order
         $searchInputsHtml = '';

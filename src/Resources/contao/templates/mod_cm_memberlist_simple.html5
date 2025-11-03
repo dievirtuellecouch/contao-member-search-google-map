@@ -24,6 +24,11 @@
     ?>
     <form action="<?= $resolvedAction; ?>" method="get">
       <input type="hidden" name="cmf_submitted" value="1">
+      <?php if (!empty($this->filter_fields)): ?>
+      <div class="mgroupfilter">
+        <?= $this->filter_fields; ?>
+      </div>
+      <?php endif; ?>
       <div class="formbody">
         <?php if ($this->fieldsearch && !$this->multifieldsearch): ?>
           <label for="ctrl_search" class="notinvisible"><?= $this->fields_label; ?></label>
