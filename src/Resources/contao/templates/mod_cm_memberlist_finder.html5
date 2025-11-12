@@ -62,10 +62,6 @@
 
     <label for="plz" class="notinvisible">Postleitzahl</label>
     <input type="text" name="plz" id="plz" class="text" value="<?= $this->plz; ?>" >
-    <?php if (!empty($this->show_country)) : ?>
-      <label for="cm_country"><?= $this->lbl_country; ?></label>
-      <?= $this->visitorcountry; ?>
-    <?php endif; ?>
     <?php if ($this->distanceform) : ?>
       <br>
       <?php if ($this->distanceasdropdown) : ?>
@@ -78,6 +74,10 @@
         <input type="text" name="cm_max_dist" class="cm_max_dist" value="<?= $this->max_dist; ?>">
       <?php endif ?>
       <span class="distitem"><?= $this->cm_distitem; ?></span>
+    <?php endif; ?>
+    <?php if (!empty($this->show_country)) : ?>
+      <label for="cm_country"><?= $this->lbl_country; ?></label>
+      <?= $this->visitorcountry; ?>
     <?php endif; ?>
     <?php if ($this->cm_gc_acceptance_required) : ?>
     <div class="checkbox_container">

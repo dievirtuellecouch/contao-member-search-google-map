@@ -46,10 +46,6 @@
           </div>
         <?php endif; ?>
       
-        <?php if (!empty($this->show_country)) : ?>
-          <label for="cm_country"><?= $this->lbl_country; ?></label>
-          <?= $this->visitorcountry; ?>
-        <?php endif; ?>
     <?php if ($this->distanceform) : ?>
       <div class="cm-radius-row" style="display:flex;align-items:center;gap:.5rem;flex-wrap:nowrap;">
         <?php if ($this->distanceasdropdown) : ?>
@@ -62,6 +58,10 @@
         <span class="distitem"><?= $this->cm_distitem; ?></span>
       </div>
     <?php endif; ?>
+        <?php if (!empty($this->show_country)) : ?>
+          <label for="cm_country"><?= $this->lbl_country; ?></label>
+          <?= $this->visitorcountry; ?>
+        <?php endif; ?>
         <?php if (!empty($this->show_address)) : ?>
           <label for="cm_location"><?= $this->lbl_location; ?></label>
           <input type="text" name="cm_location" class="cm_location" value="<?= $this->visitorlocation ?>">
