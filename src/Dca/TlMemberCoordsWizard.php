@@ -178,4 +178,21 @@ HTML;
 
         return $html.$js;
     }
+
+    /**
+     * Renders a backend button to (re)generate coordinates for the current member.
+     */
+    public function generateCoordsButton(DataContainer $dc): string
+    {
+        try {
+            $id = (int) ($dc->id ?? 0);
+            if ($id <= 0) { return ''; }
+            $label = 'GEO-Koordinaten generieren';
+            $title = 'GEO-Koordinaten anhand der Adresse berechnen und speichern';
+            $href = 'contao?do=member&act=edit&id='.$id.'&key=genCoords';
+            return ' <a class="tl_submit" href="'.htmlspecialchars($href, ENT_QUOTES).'" title="'.htmlspecialchars($title, ENT_QUOTES).'">'.htmlspecialchars($label, ENT_QUOTES).'</a>';
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
 }

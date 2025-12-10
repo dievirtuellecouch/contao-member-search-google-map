@@ -151,7 +151,8 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['cm_membergooglemaps_coords'] = [
     'inputType' => 'text',
     'eval'      => ['maxlength'=>255, 'tl_class'=>'w50 clr'],
     'wizard'    => [
-        [\Cm\MemberGoogleMapsBundle\Dca\TlMemberCoordsWizard::class, 'coordsInlineMap']
+        [\Cm\MemberGoogleMapsBundle\Dca\TlMemberCoordsWizard::class, 'coordsInlineMap'],
+        [\Cm\MemberGoogleMapsBundle\Dca\TlMemberCoordsWizard::class, 'generateCoordsButton']
     ],
     'sql'       => "varchar(255) NOT NULL default ''",
 ];

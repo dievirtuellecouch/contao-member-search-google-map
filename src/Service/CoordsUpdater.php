@@ -14,44 +14,56 @@ class CoordsUpdater extends Backend
 {
     public function handle(): void
     {
-        // Only react to our key
-        if (Input::get('key') !== 'updCoords') {
+        $key = (string) (Input::get('key') ?? '');
+        if ($key !== 'updCoords' && $key !== 'genCoords') {
             return;
         }
 
         $db = Database::getInstance();
+        if ($key === 'genCoords') {
+            $id = (int) (Input::get('id') ?? 0);
+            if ($id <= 0) {
+                Message::addError('Ungültige Mitglieds-ID.');
+                Controller::redirect('contao?do=member');
+            }
+            $row = $db->prepare('SELECT id,street,postal,city,country,cm_membergooglemaps_coords,cm_membergooglemaps_lat,cm_membergooglemaps_lng FROM tl_member WHERE id=?')->limit(1)->execute($id)->row();
+            if (!$row) {
+                Message::addError('Mitglied nicht gefunden.');
+                Controller::redirect('contao?do=member');
+            }
+            $res = $this->updateMemberCoordsIfNeeded($row);
+            if ($res['status'] === 'updated') {
+                Message::addConfirmation('GEO-Koordinaten wurden neu berechnet und gespeichert.');
+            } elseif ($res['status'] === 'unchanged') {
+                Message::addInfo('GEO-Koordinaten sind bereits aktuell.');
+            } elseif ($res['status'] === 'skipped') {
+                Message::addInfo('Adresse unvollständig – keine Berechnung durchgeführt.');
+            } else {
+                Message::addError('Koordinaten konnten nicht berechnet werden.');
+            }
+            Controller::redirect('contao?do=member&act=edit&id='.$id);
+        }
+
+        // updCoords: Alle Mitglieder prüfen und ggf. neu berechnen
         $limit = max(1, (int) (Input::get('limit') ?: 250));
-
-        // DBAL does not support binding LIMIT reliably across drivers – inject validated int
-        $sql = "SELECT id,street,postal,city,country,cm_membergooglemaps_coords FROM tl_member "
-             . "WHERE (cm_membergooglemaps_coords='' OR cm_membergooglemaps_coords IS NULL) "
-             . "AND (street<>'' OR city<>'' OR postal<>'') ORDER BY id ASC LIMIT ".(int)$limit;
+        $sql = "SELECT id,street,postal,city,country,cm_membergooglemaps_coords,cm_membergooglemaps_lat,cm_membergooglemaps_lng FROM tl_member "
+             . "WHERE (street<>'' OR city<>'' OR postal<>'') ORDER BY id ASC LIMIT ".(int)$limit;
         $members = $db->execute($sql);
-
         if (!$members->numRows) {
-            Message::addInfo('Es gibt keine Mitglieder mit fehlenden Koordinaten.');
+            Message::addInfo('Keine Mitglieder mit Adressangaben gefunden.');
             Controller::redirect('contao?do=member');
         }
-
-        $ok = 0; $skip = 0; $err = 0;
+        $updated = 0; $unchanged = 0; $skipped = 0; $errors = 0;
         while ($members->next()) {
-            $row = $members->row();
-            $addr = trim(($row['street'] ? $row['street'].' ' : '').($row['postal'] ? $row['postal'].' ' : '').($row['city'] ?: ''));
-            $country = strtoupper(trim((string) ($row['country'] ?: 'DE')));
-            if ($addr === '') { $skip++; continue; }
-            [$lat, $lng] = $this->geocode($addr, $country);
-            if ($lat === null || $lng === null) { $err++; continue; }
-            $coords = $lat.','.$lng;
-            try {
-                $db->prepare("UPDATE tl_member SET cm_membergooglemaps_coords=?, cm_membergooglemaps_lat=?, cm_membergooglemaps_lng=?, cm_membergooglemaps_attempts=cm_membergooglemaps_attempts+1 WHERE id=?")
-                    ->execute($coords, (string)$lat, (string)$lng, (int)$row['id']);
-                $ok++;
-            } catch (\Throwable $e) {
-                $err++;
+            $res = $this->updateMemberCoordsIfNeeded($members->row());
+            switch ($res['status']) {
+                case 'updated':   $updated++; break;
+                case 'unchanged': $unchanged++; break;
+                case 'skipped':   $skipped++; break;
+                default:          $errors++; break;
             }
         }
-
-        Message::addConfirmation(sprintf('Koordinaten aktualisiert: %d, übersprungen: %d, Fehler: %d', $ok, $skip, $err));
+        Message::addConfirmation(sprintf('GEO-Koordinaten – aktualisiert: %d, unverändert: %d, übersprungen: %d, Fehler: %d', $updated, $unchanged, $skipped, $errors));
         Controller::redirect('contao?do=member');
     }
 
@@ -80,5 +92,61 @@ class CoordsUpdater extends Backend
         } catch (\Throwable $e) {
             return [null, null];
         }
+    }
+
+    /**
+     * Update member coordinates if missing or if they deviate from the geocoded address.
+     * @param array $row tl_member row (must include id, street, postal, city, country, coords/lat/lng)
+     * @return array {status: updated|unchanged|skipped|error}
+     */
+    private function updateMemberCoordsIfNeeded(array $row): array
+    {
+        $addr = trim((($row['street'] ?? '') ? $row['street'].' ' : '').(($row['postal'] ?? '') ? $row['postal'].' ' : '').($row['city'] ?? ''));
+        $country = strtoupper(trim((string) ($row['country'] ?? 'DE')));
+        if ($addr === '') {
+            return ['status' => 'skipped'];
+        }
+        [$newLat, $newLng] = $this->geocode($addr, $country);
+        if ($newLat === null || $newLng === null) {
+            return ['status' => 'error'];
+        }
+        $have = trim((string) ($row['cm_membergooglemaps_coords'] ?? ''));
+        $oldLat = (string) ($row['cm_membergooglemaps_lat'] ?? '');
+        $oldLng = (string) ($row['cm_membergooglemaps_lng'] ?? '');
+        $curLat = null; $curLng = null;
+        if ($oldLat !== '' && $oldLng !== '') {
+            $curLat = (float) $oldLat; $curLng = (float) $oldLng;
+        } elseif ($have !== '' && strpos($have, ',') !== false) {
+            [$a,$b] = array_map('trim', explode(',', $have, 2));
+            if ($a !== '' && $b !== '') { $curLat = (float)$a; $curLng = (float)$b; }
+        }
+        $needsUpdate = true;
+        if ($curLat !== null && $curLng !== null) {
+            $dist = $this->haversine($curLat, $curLng, (float)$newLat, (float)$newLng);
+            // Update only if deviation > 100 m
+            $needsUpdate = ($dist > 0.1);
+        }
+        if (!$needsUpdate) {
+            return ['status' => 'unchanged'];
+        }
+        $coords = $newLat.','.$newLng;
+        try {
+            Database::getInstance()->prepare("UPDATE tl_member SET cm_membergooglemaps_coords=?, cm_membergooglemaps_lat=?, cm_membergooglemaps_lng=?, cm_membergooglemaps_attempts=cm_membergooglemaps_attempts+1 WHERE id=?")
+                ->execute($coords, (string)$newLat, (string)$newLng, (int)$row['id']);
+            return ['status' => 'updated'];
+        } catch (\Throwable $e) {
+            return ['status' => 'error'];
+        }
+    }
+
+    private function haversine(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        // returns distance in km
+        $R = 6371.0;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat/2) * sin($dLat/2) + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng/2) * sin($dLng/2);
+        $c = 2 * atan2(sqrt($a), sqrt(1-$a));
+        return $R * $c;
     }
 }

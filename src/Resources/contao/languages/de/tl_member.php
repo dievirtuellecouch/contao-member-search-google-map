@@ -135,5 +135,5 @@ $GLOBALS['TL_LANG']['tl_member']['cm_membergooglemaps_center'][1] = 'Zentrum als
 $GLOBALS['TL_LANG']['tl_member']['cm_membergooglemaps_zoom'][0] = 'Kartenvergrößerung';
 $GLOBALS['TL_LANG']['tl_member']['cm_membergooglemaps_zoom'][1] = 'Zoomstufe (0–21).';
 
-// Global Operation: fehlende Koordinaten ergänzen
-$GLOBALS['TL_LANG']['tl_member']['updCoords'] = ['Fehlende Koordinaten ergänzen', 'Ermittelt fehlende Geokoordinaten anhand der Adresse.'];
+// Global Operation: GEO-Koordinaten neu generieren
+$GLOBALS['TL_LANG']['tl_member']['updCoords'] = ['GEO-Koordinaten neu generieren', 'GEO-Koordinaten anhand der Adresse neu berechnen.'];

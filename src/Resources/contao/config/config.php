@@ -12,5 +12,6 @@ $GLOBALS['BE_FFL']['cm_ListWizard'] = \Cm\MemberGoogleMapsBundle\Widget\ListSele
 // Ensure only one search field list appears in module configuration (run late via hook)
 $GLOBALS['TL_HOOKS']['loadDataContainer'][] = [\Cm\MemberGoogleMapsBundle\Dca\DcaTweaks::class, 'onLoadDca'];
 
-// Backend global operation: update missing coordinates
+// Backend operations: coordinate maintenance
 $GLOBALS['BE_MOD']['accounts']['member']['updCoords'] = [\Cm\MemberGoogleMapsBundle\Service\CoordsUpdater::class, 'handle'];
+$GLOBALS['BE_MOD']['accounts']['member']['genCoords'] = [\Cm\MemberGoogleMapsBundle\Service\CoordsUpdater::class, 'handle'];

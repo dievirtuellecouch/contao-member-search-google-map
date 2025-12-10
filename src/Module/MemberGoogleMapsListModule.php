@@ -340,16 +340,9 @@ class MemberGoogleMapsListModule extends Module
             $displayFields = array_values(array_unique(array_merge($displayFields, $searchFieldsConfigured)));
         }
 
-        // Determine which service groups are selected for output in the module
+        // Service fields presence (used by templates for headings)
         $serviceFieldsSelected = array_values(array_intersect($displayFields, ['LeistungenAllgemein','Lieferant','Sachverstaendiger']));
         $hasAnyService = !empty($serviceFieldsSelected);
-        // Collapse service groups into a single visible field "LeistungenAllgemein"
-        if ($hasAnyService) {
-            $displayFields = array_values(array_unique(array_merge(
-                array_diff($displayFields, ['Lieferant','Sachverstaendiger']),
-                ['LeistungenAllgemein']
-            )));
-        }
         $this->Template->hasServiceFields = $hasAnyService;
 
         // SELECT (always include address columns so templates can render city/postal regardless of config)
@@ -582,33 +575,9 @@ class MemberGoogleMapsListModule extends Module
                     $item[$ensure] = (string) ($row[$ensure] ?? '');
                 }
             }
-            // Combine selected service groups into one output under "Leistungen Allgemein"
-            try {
-                $all = [];
-                $groupsToCombine = $serviceFieldsSelected ?: [];
-                foreach ($groupsToCombine as $gf) {
-                    $raw = $row[$gf] ?? '';
-                    $arr = [];
-                    if (is_string($raw) && strpos($raw, 'a:') === 0) {
-                        $arr = StringUtil::deserialize($raw, true);
-                    } elseif (is_string($raw) && $raw !== '') {
-                        // Fallback: comma separated string
-                        $arr = array_filter(array_map('trim', explode(',', $raw)), 'strlen');
-                    } elseif (is_array($raw)) {
-                        $arr = $raw;
-                    }
-                    foreach ((array)$arr as $v) {
-                        if ($v !== '') { $all[] = (string) $v; }
-                    }
-                }
-                $all = array_values(array_unique($all));
-                $item['LeistungenAllgemein'] = $all ? implode(', ', $all) : '';
-                // Clear the other group outputs so the templates only show the combined list
-                $item['Lieferant'] = '';
-                $item['Sachverstaendiger'] = '';
-            } catch (\Throwable $e) { /* ignore combine errors */ }
-                $items[] = $item;
-            }
+            // Keep service fields as-is; templates will show headings per group only if member has selections
+            $items[] = $item;
+        }
         }
 
         // Ensure German field labels are available
