@@ -9,6 +9,7 @@ use Contao\Environment;
 use Contao\Input;
 use Contao\Message;
 use Contao\System;
+use Symfony\Component\Security\Csrf\CsrfToken;
 
 class CoordsUpdater extends Backend
 {
@@ -17,6 +18,11 @@ class CoordsUpdater extends Backend
         $key = (string) (Input::get('key') ?? '');
         if ($key !== 'updCoords' && $key !== 'genCoords') {
             return;
+        }
+
+        if (!$this->isValidRequestToken()) {
+            Message::addError('Ungültiger Request-Token.');
+            Controller::redirect('contao?do=member');
         }
 
         $db = Database::getInstance();
@@ -44,10 +50,12 @@ class CoordsUpdater extends Backend
             Controller::redirect('contao?do=member&act=edit&id='.$id);
         }
 
-        // updCoords: Alle Mitglieder prüfen und ggf. neu berechnen
-        $limit = max(1, (int) (Input::get('limit') ?: 250));
+        // updCoords: members with missing coordinates first, then stale auto-generated coordinates.
+        $limit = min(50, max(1, (int) (Input::get('limit') ?: 25)));
         $sql = "SELECT id,street,postal,city,country,cm_membergooglemaps_coords,cm_membergooglemaps_lat,cm_membergooglemaps_lng FROM tl_member "
-             . "WHERE (street<>'' OR city<>'' OR postal<>'') ORDER BY id ASC LIMIT ".(int)$limit;
+             . "WHERE (street<>'' OR city<>'' OR postal<>'') "
+             . "AND (cm_membergooglemaps_coords='' OR cm_membergooglemaps_lat='' OR cm_membergooglemaps_lng='' OR cm_membergooglemaps_autocoords='1') "
+             . "ORDER BY (cm_membergooglemaps_coords='') DESC, cm_membergooglemaps_attempts ASC, id ASC LIMIT ".(int)$limit;
         $members = $db->execute($sql);
         if (!$members->numRows) {
             Message::addInfo('Keine Mitglieder mit Adressangaben gefunden.');
@@ -71,7 +79,8 @@ class CoordsUpdater extends Backend
     {
         $apiKey = '';
         try {
-            if (!empty($_SERVER['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_SERVER['GOOGLE_MAPS_API_KEY']; }
+            if (System::getContainer()->hasParameter('google_maps_api_key')) { $apiKey = (string) System::getContainer()->getParameter('google_maps_api_key'); }
+            elseif (!empty($_SERVER['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_SERVER['GOOGLE_MAPS_API_KEY']; }
             elseif (!empty($_ENV['GOOGLE_MAPS_API_KEY'])) { $apiKey = (string) $_ENV['GOOGLE_MAPS_API_KEY']; }
             elseif (($tmp = getenv('GOOGLE_MAPS_API_KEY')) !== false && $tmp !== '') { $apiKey = (string) $tmp; }
             elseif (System::getContainer()->hasParameter('env(GOOGLE_MAPS_API_KEY)')) { $apiKey = (string) System::getContainer()->getParameter('env(GOOGLE_MAPS_API_KEY)'); }
@@ -80,7 +89,7 @@ class CoordsUpdater extends Backend
 
         $url = 'https://maps.googleapis.com/maps/api/geocode/json?language=de&key='.rawurlencode($apiKey)
              .'&address='.rawurlencode($address.' '.$country);
-        $opts = ['http' => ['timeout' => 4.0]];
+        $opts = ['http' => ['timeout' => 2.0]];
         try {
             $json = @file_get_contents($url, false, stream_context_create($opts));
             if ($json === false) { return [null, null]; }
@@ -147,6 +156,21 @@ class CoordsUpdater extends Backend
         $dLng = deg2rad($lng2 - $lng1);
         $a = sin($dLat/2) * sin($dLat/2) + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng/2) * sin($dLng/2);
         $c = 2 * atan2(sqrt($a), sqrt(1-$a));
-        return $R * $c;
+            return $R * $c;
+    }
+
+    private function isValidRequestToken(): bool
+    {
+        try {
+            $container = System::getContainer();
+            $token = (string) (Input::get('rt') ?? '');
+
+            return $token !== ''
+                && $container->get('contao.csrf.token_manager')->isTokenValid(
+                    new CsrfToken((string) $container->getParameter('contao.csrf_token_name'), $token)
+                );
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 }

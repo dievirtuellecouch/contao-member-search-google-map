@@ -75,7 +75,7 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['LeistungenAllgemein'] = [
         'Ausbildungsbetrieb','Dekontamination von Reinraumkleidung','Zertifiziertes Hygienemanagementsystem (RABC, RAL oder vergleichbar)'
     ],
     'eval'      => ['multiple'=>true, 'tl_class'=>'clr', 'feViewable'=>true, 'feEditable'=>true],
-    'sql'       => "varchar(1022) NOT NULL default ''",
+    'sql'       => "text NULL",
 ];
 
 $GLOBALS['TL_DCA']['tl_member']['fields']['Lieferant'] = [
@@ -89,7 +89,7 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['Lieferant'] = [
         'Schmutzfangmatten-Sauberlaufsysteme','Versicherungen','Beratungen','Software-Hardware-EDV-Beratungen','Institute-Vereinigungen-Verbände'
     ],
     'eval'      => ['multiple'=>true, 'tl_class'=>'clr', 'feViewable'=>true, 'feEditable'=>true],
-    'sql'       => "varchar(1000) NOT NULL default ''",
+    'sql'       => "text NULL",
 ];
 
 $GLOBALS['TL_DCA']['tl_member']['fields']['Sachverstaendiger'] = [
@@ -99,7 +99,7 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['Sachverstaendiger'] = [
     'inputType' => 'checkbox',
     'options'   => ['Reinigung','Wäscherei','Textilien','Leder','Pelz','Teppiche','Heimtextilien','Wäschereitechnik','Reinigungstechnik'],
     'eval'      => ['multiple'=>true, 'tl_class'=>'clr', 'feViewable'=>true, 'feEditable'=>true],
-    'sql'       => "varchar(500) NOT NULL default ''",
+    'sql'       => "text NULL",
 ];
 
 // Additional legacy fields
@@ -161,7 +161,7 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['cm_membergooglemaps_lat'] = [
     'label'     => &$GLOBALS['TL_LANG']['tl_member']['cm_membergooglemaps_lat'],
     'exclude'   => true,
     'inputType' => 'text',
-    'eval'      => ['rgxp'=>'digit', 'tl_class'=>'w50'],
+    'eval'      => ['maxlength'=>64, 'tl_class'=>'w50'],
     'sql'       => "varchar(64) NOT NULL default ''",
 ];
 
@@ -169,7 +169,7 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['cm_membergooglemaps_lng'] = [
     'label'     => &$GLOBALS['TL_LANG']['tl_member']['cm_membergooglemaps_lng'],
     'exclude'   => true,
     'inputType' => 'text',
-    'eval'      => ['rgxp'=>'digit', 'tl_class'=>'w50'],
+    'eval'      => ['maxlength'=>64, 'tl_class'=>'w50'],
     'sql'       => "varchar(64) NOT NULL default ''",
 ];
 
@@ -241,9 +241,8 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['cm_membergooglemaps_indivzoom'] = [
         'company','street','postal','city','firstname','lastname',
         'phone','fax','email','website',
         'LeistungenAllgemein','Lieferant','dateOfBirth','gender','Sachverstaendiger',
-        'vereidigtreinigung','vereidigtreinigungvon','state','country','mobile','language','username',
-        'avatar',
-        'cm_membergooglemaps_coords','cm_membergooglemaps_lat','cm_membergooglemaps_lng','cm_membergooglemaps_center','cm_membergooglemaps_zoom'
+        'vereidigtreinigung','vereidigtreinigungvon','state','country','mobile','language',
+        'avatar'
     ];
     foreach ($fields as $f) {
         if (isset($GLOBALS['TL_DCA']['tl_member']['fields'][$f])) {

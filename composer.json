@@ -1,5 +1,6 @@
 {
   "name": "dievirtuellecouch/contao-member-search-google-map",
+  "version": "1.0.11",
   "description": "Member Google Maps and ZIP search for Contao 5.3 (ported)",
   "type": "contao-bundle",
   "license": "proprietary",
@@ -17,4 +18,3 @@
     "contao-manager-plugin": "Cm\\MemberGoogleMapsBundle\\ContaoManager\\Plugin"
   }
 }
-

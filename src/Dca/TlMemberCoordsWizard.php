@@ -105,7 +105,13 @@ class TlMemberCoordsWizard
 </script>
 HTML;
 
-        $onclick = "cmOpenCoordsOverlay('".$fieldId."','".$lat."','".$lng."','".$apiKey."',''); return false;";
+        $onclick = 'cmOpenCoordsOverlay('
+            .json_encode($fieldId).','
+            .json_encode($lat).','
+            .json_encode($lng).','
+            .json_encode($apiKey).','
+            .json_encode('')
+            .'); return false;';
         $btn = ' <a id="'.$btnId.'" href="#" onclick="'.$onclick.'" class="tl_submit" title="'.$title.'">'.$label.'</a>';
         return $script.$btn;
     }
@@ -189,7 +195,17 @@ HTML;
             if ($id <= 0) { return ''; }
             $label = 'GEO-Koordinaten generieren';
             $title = 'GEO-Koordinaten anhand der Adresse berechnen und speichern';
+            $token = '';
+            try {
+                $token = (string) \Contao\System::getContainer()->get('contao.csrf.token_manager')->getDefaultTokenValue();
+            } catch (\Throwable $e) {
+            }
+
             $href = 'contao?do=member&act=edit&id='.$id.'&key=genCoords';
+            if ($token !== '') {
+                $href .= '&rt='.rawurlencode($token);
+            }
+
             return ' <a class="tl_submit" href="'.htmlspecialchars($href, ENT_QUOTES).'" title="'.htmlspecialchars($title, ENT_QUOTES).'">'.htmlspecialchars($label, ENT_QUOTES).'</a>';
         } catch (\Throwable $e) {
             return '';

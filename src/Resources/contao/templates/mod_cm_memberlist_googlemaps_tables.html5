@@ -1,5 +1,1 @@
-<?php
-// Alias to support a common typo (plural) by delegating to the singular table template
-?>
-<?= $this->insert('mod_cm_memberlist_googlemaps_table'); ?>
-
+<?= $this->insert('mod_cm_memberlist_googlemaps_tabless'); ?>

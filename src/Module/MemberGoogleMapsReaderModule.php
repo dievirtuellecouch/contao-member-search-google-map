@@ -47,7 +47,7 @@ class MemberGoogleMapsReaderModule extends Module
             $values[] = (string) $show;
         }
 
-        $stmt = Database::getInstance()->prepare("SELECT id,firstname,lastname,company,street,postal,city,phone,email,website,cm_membergooglemaps_coords,alias,services_general,services_supplier,services_expert FROM tl_member WHERE ".$where." AND disable!=1");
+        $stmt = Database::getInstance()->prepare("SELECT id,firstname,lastname,company,street,postal,city,country,phone,fax,email,website,cm_membergooglemaps_coords,alias,LeistungenAllgemein,Lieferant,Sachverstaendiger,vereidigtreinigung,vereidigtreinigungvon FROM tl_member WHERE ".$where." AND disable!=1");
         $res = $stmt->execute(...$values);
         if (!$res->numRows) {
             $this->Template->invalid = true;
@@ -55,9 +55,9 @@ class MemberGoogleMapsReaderModule extends Module
         }
         $row = $res->row();
         // Deserialize services
-        $row['services_general'] = \Contao\StringUtil::deserialize($row['services_general'] ?? null, true);
-        $row['services_supplier'] = \Contao\StringUtil::deserialize($row['services_supplier'] ?? null, true);
-        $row['services_expert'] = \Contao\StringUtil::deserialize($row['services_expert'] ?? null, true);
+        $row['services_general'] = \Contao\StringUtil::deserialize($row['LeistungenAllgemein'] ?? null, true);
+        $row['services_supplier'] = \Contao\StringUtil::deserialize($row['Lieferant'] ?? null, true);
+        $row['services_expert'] = \Contao\StringUtil::deserialize($row['Sachverstaendiger'] ?? null, true);
         $this->Template->item = $row;
         $this->Template->servicesLabels = [
             'general' => $GLOBALS['TL_LANG']['tl_member']['services_general_ref'] ?? [],

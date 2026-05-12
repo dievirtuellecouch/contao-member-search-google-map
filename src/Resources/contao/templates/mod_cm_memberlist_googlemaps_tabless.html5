@@ -74,7 +74,68 @@
 /* Disable before pseudo-elements inside the member list to avoid theme decorations */
 #memberlist .body::before,
 #memberlist .body *::before { content: none !important; display: none !important; }
+#memberlist .memberCard .company-line,
+#memberlist .memberCard .name-line,
+#memberlist .memberCard .address-block,
+#memberlist .memberCard .contact-block,
+#memberlist .memberCard .service-block,
+#memberlist .memberCard .extra-field,
+#memberlist .memberCard .distance-block,
+#memberlist .memberCard .route-block { display: block !important; }
 </style>
+
+<?php
+  $formatValue = static function ($value): string {
+    if (is_array($value)) {
+      return trim(implode(', ', array_filter(array_map('strval', $value), 'strlen')));
+    }
+
+    if (is_string($value) && strpos($value, 'a:') === 0) {
+      try {
+        $arr = \Contao\StringUtil::deserialize($value, true);
+        if (is_array($arr)) {
+          return trim(implode(', ', array_filter(array_map('strval', $arr), 'strlen')));
+        }
+      } catch (\Throwable $e) {
+      }
+    }
+
+    return trim((string) $value);
+  };
+
+  $fieldValue = static function (array $item, string $field) use ($formatValue): string {
+    if ($field === 'city') {
+      return $formatValue($item['stadt'] ?? ($item['ort'] ?? ($item['city'] ?? '')));
+    }
+
+    return $formatValue($item[$field] ?? '');
+  };
+
+  $bodyClass = static function (int $col, bool $last = false): string {
+    return 'body col_'.$col.($col === 0 ? ' col_first' : '').($last ? ' col_last' : '');
+  };
+
+  $websiteData = static function (array $item): array {
+    $label = trim((string) ($item['website'] ?? ''));
+    $url = trim((string) ($item['websiteUrl'] ?? ''));
+
+    if ($url === '' && $label !== '') {
+      $url = preg_match('~^https?://~i', $label) ? $label : 'https://'.$label;
+    }
+
+    if ($label === '' && $url !== '') {
+      $label = rtrim(preg_replace('~^https?://~i', '', $url), '/');
+    }
+
+    return [$url, $label];
+  };
+
+  $serviceFields = [
+    'LeistungenAllgemein' => 'Leistungen Allgemein',
+    'Lieferant' => 'Fördermitglied/Lieferant',
+    'Sachverstaendiger' => 'Sachverständiger für',
+  ];
+?>
 
 <?php if (!empty($this->includeMap) && ($this->mapPosition ?? 'bottom') === 'top'): ?>
   <?php
@@ -138,153 +199,156 @@
           $classes[] = 'memberCard';
         ?>
         <div class="<?= implode(' ', $classes) ?>">
-          <?php $df = is_array($this->displayFields ?? null) ? $this->displayFields : []; $col = 0; $namePrinted = false; $addressPrinted = false; $nameCol = null; $contactHeadingPrinted = false; $distanceHeadingPrinted = false; $laHeadingPrinted=false; $lieferantHeadingPrinted=false; $sachHeadingPrinted=false; ?>
+          <?php $df = is_array($this->displayFields ?? null) ? array_values(array_unique($this->displayFields)) : []; $col = 0; ?>
           <?php
-            // Ensure website is rendered before LeistungenAllgemein when both are present
-            if (is_array($df)) {
-              $wi = array_search('website', $df, true);
-              $li = array_search('LeistungenAllgemein', $df, true);
-              if ($wi !== false && $li !== false && $wi > $li) {
-                array_splice($df, $wi, 1);
-                array_splice($df, $li, 0, ['website']);
-              }
-              // De-duplicate fields to avoid double outputs (e.g., duplicated firstname)
-              $df = array_values(array_unique($df));
-            }
-          ?>
-          <!-- displayFields: <?= htmlspecialchars(implode(',', $df), ENT_QUOTES, 'UTF-8') ?> -->
-          <?php
-            // Build contact block data once and find its insertion index
+            $visibleFields = array_fill_keys($df, true);
+            $hasField = static fn (string $field): bool => isset($visibleFields[$field]);
+
             $contactKeys = ['phone','fax','email','website'];
             $contactPresent = [];
             foreach ($contactKeys as $ck) {
-              $v = trim((string)($it[$ck] ?? ''));
-              if ($ck==='phone' || $ck==='fax') { $v = preg_replace('~^(Telefon|Tel\.|Tel|Phone|Fax)\s*:\s*~i','', $v); }
-              if ($v!=='') { $contactPresent[$ck] = $v; }
+              if (!$hasField($ck)) {
+                continue;
+              }
+
+              if ($ck === 'website') {
+                [$url, $label] = $websiteData($it);
+                if ($url !== '' && $label !== '') {
+                  $contactPresent[$ck] = ['url' => $url, 'label' => $label];
+                }
+                continue;
+              }
+
+              $v = $fieldValue($it, $ck);
+              if ($ck === 'phone' || $ck === 'fax') {
+                $v = preg_replace('~^(Telefon|Tel\.|Tel|Phone|Fax)\s*:\s*~i', '', $v);
+              }
+              if ($v !== '') {
+                $contactPresent[$ck] = $v;
+              }
             }
-            $contactFirstIdx = null;
-            if ($contactPresent) {
-              foreach ($df as $ii=>$nm) { if (isset($contactPresent[$nm])) { $contactFirstIdx=$ii; break; } }
+
+            $addressLines = [];
+            $street = $hasField('street') ? $fieldValue($it, 'street') : '';
+            if ($street !== '') {
+              $addressLines[] = $street;
             }
+
+            $postal = $hasField('postal') ? $fieldValue($it, 'postal') : '';
+            $city = $hasField('city') ? $fieldValue($it, 'city') : '';
+            $postalCity = trim($postal.' '.$city);
+            if ($postalCity !== '') {
+              $addressLines[] = $postalCity;
+            }
+
+            $state = $hasField('state') ? $fieldValue($it, 'state') : '';
+            if ($state !== '') {
+              $addressLines[] = $state;
+            }
+
+            $country = $hasField('country') ? $fieldValue($it, 'country') : '';
+            if ($country !== '') {
+              $addressLines[] = $country;
+            }
+
+            $knownFields = array_fill_keys(array_merge(
+              ['avatar', 'company', 'firstname', 'lastname', 'street', 'postal', 'city', 'state', 'country'],
+              $contactKeys,
+              array_keys($serviceFields)
+            ), true);
           ?>
-          <?php $seen = []; foreach ($df as $idx=>$field): if (isset($seen[$field])) continue; $seen[$field]=true; ?>
-            <?php switch ($field): case 'avatar': ?>
-              <p class="body col_<?= $col ?><?= $col===0?' col_first':'' ?>">
-                <?php if (!empty($it['avatar'])): ?>
-                  <img src="<?= htmlspecialchars($it['avatar'], ENT_QUOTES, 'UTF-8') ?>" alt="" class="avatar">
-                <?php endif; ?>
+
+          <?php if ($hasField('avatar') && !empty($it['avatar'])): ?>
+            <p class="<?= $bodyClass($col) ?> image-line">
+              <img src="<?= htmlspecialchars($it['avatar'], ENT_QUOTES, 'UTF-8') ?>" alt="" class="avatar">
+            </p>
+            <?php $col++; ?>
+          <?php endif; ?>
+
+          <?php $company = $hasField('company') ? $fieldValue($it, 'company') : ''; ?>
+          <?php if ($company !== ''): ?>
+            <p class="<?= $bodyClass($col) ?> company-line"><strong><?= htmlspecialchars($company, ENT_QUOTES, 'UTF-8') ?></strong></p>
+            <?php $col++; ?>
+          <?php endif; ?>
+
+          <?php
+            $nameParts = [];
+            if ($hasField('firstname')) {
+              $firstname = $fieldValue($it, 'firstname');
+              if ($firstname !== '') {
+                $nameParts[] = $firstname;
+              }
+            }
+            if ($hasField('lastname')) {
+              $lastname = $fieldValue($it, 'lastname');
+              if ($lastname !== '') {
+                $nameParts[] = $lastname;
+              }
+            }
+            $fullName = trim(implode(' ', $nameParts));
+          ?>
+          <?php if ($fullName !== ''): ?>
+            <p class="<?= $bodyClass($col) ?> name-line"><?= htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8') ?></p>
+            <?php $col++; ?>
+          <?php endif; ?>
+
+          <?php if ($addressLines): ?>
+            <p class="<?= $bodyClass($col) ?> address-block">
+              <?php foreach ($addressLines as $lineIndex => $line): ?>
+                <?= $lineIndex > 0 ? '<br>' : '' ?><?= htmlspecialchars($line, ENT_QUOTES, 'UTF-8') ?>
+              <?php endforeach; ?>
+            </p>
+            <?php $col++; ?>
+          <?php endif; ?>
+
+          <?php if ($contactPresent): ?>
+            <p class="<?= $bodyClass($col) ?> contact-block">
+              <strong>Kontakt</strong>
+              <?php if (!empty($contactPresent['phone'])): ?>
+                <br>Telefon: <?= htmlspecialchars($contactPresent['phone'], ENT_QUOTES, 'UTF-8') ?>
+              <?php endif; ?>
+              <?php if (!empty($contactPresent['fax'])): ?>
+                <br>Fax: <?= htmlspecialchars($contactPresent['fax'], ENT_QUOTES, 'UTF-8') ?>
+              <?php endif; ?>
+              <?php if (!empty($contactPresent['email'])): ?>
+                <br><a href="mailto:<?= htmlspecialchars($contactPresent['email'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($contactPresent['email'], ENT_QUOTES, 'UTF-8') ?></a>
+              <?php endif; ?>
+              <?php if (!empty($contactPresent['website'])): ?>
+                <br><a href="<?= htmlspecialchars($contactPresent['website']['url'], ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener"><?= htmlspecialchars($contactPresent['website']['label'], ENT_QUOTES, 'UTF-8') ?></a>
+              <?php endif; ?>
+            </p>
+            <?php $col++; ?>
+          <?php endif; ?>
+
+          <?php foreach ($serviceFields as $serviceField => $serviceLabel): ?>
+            <?php $serviceValue = $hasField($serviceField) ? $fieldValue($it, $serviceField) : ''; ?>
+            <?php if ($serviceValue !== ''): ?>
+              <p class="<?= $bodyClass($col) ?> service-block service-<?= htmlspecialchars($serviceField, ENT_QUOTES, 'UTF-8') ?>">
+                <strong><?= htmlspecialchars($serviceLabel, ENT_QUOTES, 'UTF-8') ?></strong><br>
+                <?= htmlspecialchars($serviceValue, ENT_QUOTES, 'UTF-8') ?>
               </p>
-              <?php $col++; break; ?>
-            <?php case 'company': ?>
-              <p class="body col_<?= $col ?>"><strong><?= htmlspecialchars((string)($it['company'] ?? ''), ENT_QUOTES, 'UTF-8') ?></strong></p>
-              <?php $col++; break; ?>
-            <?php case 'firstname': ?>
-              <p class="body col_<?= $col ?> name-line"><?= htmlspecialchars((string)($it['firstname'] ?? ''), ENT_QUOTES, 'UTF-8') ?></p>
-              <?php $col++; break; ?>
-            <?php case 'lastname': ?>
-              <p class="body col_<?= $col ?> name-line"><?= htmlspecialchars((string)($it['lastname'] ?? ''), ENT_QUOTES, 'UTF-8') ?></p>
-              <?php $col++; break; ?>
-            <?php case 'street': ?>
-              <p class="body col_<?= $col ?>"><?= htmlspecialchars((string)($it['street'] ?? ''), ENT_QUOTES, 'UTF-8') ?></p>
-              <?php $col++; break; ?>
-            <?php case 'postal': ?>
-              <p class="body col_<?= $col ?>"><?= htmlspecialchars((string)($it['postal'] ?? ''), ENT_QUOTES, 'UTF-8') ?></p>
-              <?php $col++; break; ?>
-            <?php case 'city': ?>
-              <?php $cityOut = ($it['stadt'] ?? ''); if (!$cityOut) { $cityOut = ($it['ort'] ?? ''); } if (!$cityOut) { $cityOut = ($it['city'] ?? ''); } ?>
-              <p class="body col_<?= $col ?>"><?= htmlspecialchars((string)$cityOut, ENT_QUOTES, 'UTF-8') ?></p>
-              <?php $col++; break; ?>
-            <?php case 'phone': case 'fax': case 'email': case 'website': ?>
-              <?php if ($contactFirstIdx !== null && $idx === $contactFirstIdx): ?>
-                <p class="body col_<?= $col ?>"><strong>Kontakt</strong></p>
-                <?php if (!empty($contactPresent['phone'])): ?>
-                  <p class="body col_<?= $col ?>">Telefon: <?= htmlspecialchars($contactPresent['phone'], ENT_QUOTES, 'UTF-8') ?></p>
-                <?php endif; ?>
-                <?php if (!empty($contactPresent['fax'])): ?>
-                  <p class="body col_<?= $col ?>">Fax: <?= htmlspecialchars($contactPresent['fax'], ENT_QUOTES, 'UTF-8') ?></p>
-                <?php endif; ?>
-                <?php if (!empty($contactPresent['email'])): ?>
-                  <p class="body col_<?= $col ?>"><a href="mailto:<?= htmlspecialchars($it['email'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($it['email'], ENT_QUOTES, 'UTF-8') ?></a></p>
-                <?php endif; ?>
-                <?php if (!empty($contactPresent['website'])): ?>
-                  <?php $rawUrl = (string)($it['website'] ?? ''); $url = preg_match('~^https?://~', $rawUrl) ? $rawUrl : ('http://'.$rawUrl); $label = rtrim(preg_replace('~^https?://~i', '', $rawUrl), '/'); ?>
-                  <p class="body col_<?= $col ?>"><a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener"><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></a></p>
-                <?php endif; ?>
-                <?php $col++; ?>
-              <?php endif; ?>
-              <?php break; ?>
-            <?php case 'LeistungenAllgemein': ?>
-              <?php
-                $valRaw = $it['LeistungenAllgemein'] ?? '';
-                $val = '';
-                if (is_string($valRaw) && strpos($valRaw, 'a:') === 0) {
-                  $arr = \Contao\StringUtil::deserialize($valRaw, true);
-                  if ($arr) { $val = implode(', ', $arr); }
-                } elseif (is_array($valRaw)) {
-                  $val = implode(', ', $valRaw);
-                } else {
-                  $val = trim((string)$valRaw);
-                }
-              ?>
-              <?php if ($val !== ''): ?>
-                <p class="body col_<?= $col ?>"><strong>Leistungen Allgemein</strong></p>
-                <p class="body col_<?= $col ?>"><?= htmlspecialchars($val, ENT_QUOTES, 'UTF-8') ?></p>
-                <?php $col++; ?>
-              <?php endif; ?>
-              <?php break; ?>
-            <?php case 'Lieferant': ?>
-              <?php
-                $valRaw = $it['Lieferant'] ?? '';
-                $val = '';
-                if (is_string($valRaw) && strpos($valRaw, 'a:') === 0) {
-                  $arr = \Contao\StringUtil::deserialize($valRaw, true);
-                  if ($arr) { $val = implode(', ', $arr); }
-                } elseif (is_array($valRaw)) {
-                  $val = implode(', ', $valRaw);
-                } else {
-                  $val = trim((string)$valRaw);
-                }
-              ?>
-              <?php if ($val !== ''): ?>
-                <p class="body col_<?= $col ?>"><strong>Fördermitglied/Lieferant</strong></p>
-                <p class="body col_<?= $col ?>"><?= htmlspecialchars($val, ENT_QUOTES, 'UTF-8') ?></p>
-                <?php $col++; ?>
-              <?php endif; ?>
-              <?php break; ?>
-            <?php case 'Sachverstaendiger': ?>
-              <?php
-                $valRaw = $it['Sachverstaendiger'] ?? '';
-                $val = '';
-                if (is_string($valRaw) && strpos($valRaw, 'a:') === 0) {
-                  $arr = \Contao\StringUtil::deserialize($valRaw, true);
-                  if ($arr) { $val = implode(', ', $arr); }
-                } elseif (is_array($valRaw)) {
-                  $val = implode(', ', $valRaw);
-                } else {
-                  $val = trim((string)$valRaw);
-                }
-              ?>
-              <?php if ($val !== ''): ?>
-                <p class="body col_<?= $col ?>"><strong>Sachverständiger für</strong></p>
-                <p class="body col_<?= $col ?>"><?= htmlspecialchars($val, ENT_QUOTES, 'UTF-8') ?></p>
-                <?php $col++; ?>
-              <?php endif; ?>
-              <?php break; ?>
-            <?php default: ?>
-              <?php if (isset($it[$field])): ?>
-                <p class="body col_<?= $col ?>"><?= htmlspecialchars((string)$it[$field], ENT_QUOTES, 'UTF-8') ?></p>
-                <?php $col++; ?>
-              <?php endif; ?>
-            <?php endswitch; ?>
+              <?php $col++; ?>
+            <?php endif; ?>
+          <?php endforeach; ?>
+
+          <?php foreach ($df as $field): ?>
+            <?php if (isset($knownFields[$field])) { continue; } ?>
+            <?php $value = $fieldValue($it, $field); if ($value !== ''): ?>
+              <p class="<?= $bodyClass($col) ?> extra-field extra-<?= htmlspecialchars($field, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($value, ENT_QUOTES, 'UTF-8') ?></p>
+              <?php $col++; ?>
+            <?php endif; ?>
           <?php endforeach; ?>
 
           <?php /* Additional optional columns that are not part of displayFields */ ?>
           <?php if (!empty($this->plzSearchUsed) && isset($it['dist'])): ?>
-            <p class="body col_<?= $col ?>"><strong>Entfernung</strong></p>
-            <p class="body col_<?= $col++ ?>"><?= htmlspecialchars(str_replace('.', ',', number_format((float)$it['dist'], 1, '.', '')), ENT_QUOTES, 'UTF-8') ?> km</p>
+            <p class="<?= $bodyClass($col) ?> distance-block">
+              <strong>Entfernung</strong><br>
+              <?= htmlspecialchars(str_replace('.', ',', number_format((float)$it['dist'], 1, '.', '')), ENT_QUOTES, 'UTF-8') ?> km
+            </p>
+            <?php $col++; ?>
           <?php endif; ?>
           <?php if (!empty($this->linkRoute) && !empty($it['routeUrl'])): ?>
-            <p class="body col_<?= $col ?> col_last">
+            <p class="<?= $bodyClass($col, true) ?> route-block">
               <a onclick="window.open(this.href); return false;" href="<?= htmlspecialchars($it['routeUrl'], ENT_QUOTES, 'UTF-8') ?>">Route</a>
             </p>
           <?php endif; ?>

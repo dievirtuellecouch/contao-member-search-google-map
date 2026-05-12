@@ -56,8 +56,7 @@ class MemberGoogleMapsListModule extends Module
                 // Always use the tableless template by default
                 $chosen = 'mod_cm_memberlist_googlemaps_tabless';
             }
-            // Enforce unified tableless template regardless of selection
-            $this->strTemplate = 'mod_cm_memberlist_googlemaps_tabless';
+            $this->strTemplate = $chosen;
             try { $this->logProbe('template_selected', ['chosen' => $this->strTemplate, 'moduleId' => (int)($this->id ?? 0)]); } catch (\Throwable $e) {}
         } catch (\Throwable $e) {
             // keep default template
@@ -192,14 +191,13 @@ class MemberGoogleMapsListModule extends Module
         // Fallbacks if empty: read directly from tl_module (migration-safety), then from legacy field config
         if (!$searchFields || !\is_array($searchFields) || !count($searchFields)) {
             try {
-                $resSF = Database::getInstance()->prepare('SELECT ml_search_fields, cm_memberlist_seachfieldslist, cm_membergooglemaps_fieldslist FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
+                $resSF = Database::getInstance()->prepare('SELECT ml_search_fields, cm_membergooglemaps_fieldslist FROM tl_module WHERE id=?')->limit(1)->execute((int) ($this->id ?? 0));
                 if ($resSF->numRows) {
                     $sf1 = StringUtil::deserialize($resSF->ml_search_fields, true);
-                    $sf2 = StringUtil::deserialize($resSF->cm_memberlist_seachfieldslist, true);
                     $sf3Rows = StringUtil::deserialize($resSF->cm_membergooglemaps_fieldslist, true);
                     $sf3 = [];
                     if ($sf3Rows && \is_array($sf3Rows)) { foreach ($sf3Rows as $r) { if (!empty($r['field'])) { $sf3[] = (string) $r['field']; } } }
-                    $searchFields = array_values(array_unique(array_filter(array_merge((array)$sf1, (array)$sf2, (array)$sf3))));
+                    $searchFields = array_values(array_unique(array_filter(array_merge((array)$sf1, (array)$sf3))));
                 }
             } catch (\Throwable $e) {}
         }
@@ -268,9 +266,9 @@ class MemberGoogleMapsListModule extends Module
             }
         }
         if ($perFieldFilters) {
-            $where .= ' AND ('.implode(' OR ', $perFieldFilters).')';
+            $where .= ' AND ('.implode(' AND ', $perFieldFilters).')';
             foreach ($perFieldValues as $v) { $values[] = $v; }
-            $this->dbg('search_per_field_or', [ 'fields' => $searchFields ]);
+            $this->dbg('search_per_field_and', [ 'fields' => $searchFields ]);
         }
 
         // Checkbox group filters for Leistungen (as separate groups)
@@ -381,6 +379,8 @@ class MemberGoogleMapsListModule extends Module
             $plzOnly = trim((string) $postal) !== '';
             if ($plzOnly && $maxDist > 0) { $wantGeocode = true; }
         }
+        $privacyAccepted = !((bool) ($this->cm_gc_acceptance_required ?? false)) || Input::get('cm_gc_privacy') !== null;
+
         // Perform geocoding whenever a location was provided (independent of map privacy checkbox)
         if ($wantGeocode) {
             [$lat1, $lng1] = $this->geocodeVisitorLocation();
@@ -459,11 +459,24 @@ class MemberGoogleMapsListModule extends Module
         ]);
 
         $items = [];
+        $totalItems = 0;
+        $perPage = (int) ($this->perPage ?: 0);
+        $page = max(1, (int) (Input::get('page') ?? 1));
+        $offset = ($page - 1) * $perPage;
+        $filterGroups = StringUtil::deserialize($this->ml_groups ?? '', true);
+
         if (!$suppressInitial) {
-            $stmt = Database::getInstance()->prepare("SELECT $selectSql FROM tl_member WHERE $where ORDER BY $orderBy");
+            if (!$filterGroups && $perPage > 0) {
+                $countStmt = Database::getInstance()->prepare("SELECT COUNT(*) AS total FROM tl_member WHERE $where");
+                $countResult = $countStmt->execute(...$values);
+                $totalItems = $countResult->numRows ? (int) $countResult->total : 0;
+                $stmt = Database::getInstance()->prepare("SELECT $selectSql FROM tl_member WHERE $where ORDER BY $orderBy LIMIT ".(int) $offset.", ".(int) $perPage);
+            } else {
+                $stmt = Database::getInstance()->prepare("SELECT $selectSql FROM tl_member WHERE $where ORDER BY $orderBy");
+            }
+
             $result = $stmt->execute(...$values);
 
-            $filterGroups = \Contao\StringUtil::deserialize($this->ml_groups ?? '', true);
             while ($result->next()) {
             $row = $result->row();
             if ($filterGroups) {
@@ -580,6 +593,10 @@ class MemberGoogleMapsListModule extends Module
         }
         }
 
+        if ($filterGroups || $perPage <= 0) {
+            $totalItems = \count($items);
+        }
+
         // Ensure German field labels are available
         try { Controller::loadLanguageFile('tl_member'); Controller::loadDataContainer('tl_member'); } catch (\Throwable $e) {}
         $labelMap = [];
@@ -644,26 +661,7 @@ class MemberGoogleMapsListModule extends Module
             // Use the actual public bundle path name (see public/bundles)
             $GLOBALS['TL_CSS']['websailing_google_map'] = 'bundles/googlemap/css/google_map.css|static';
         }
-        // Build minimal Google Maps initialization for template compatibility
-        // Avoid using undefined $includeMap variable here; check module flag directly
-        if ((bool) ($this->cm_map_onlist ?? false) && $apiKey) {
-            $mapId = 'memberlistmap_'.(int)($this->id ?? 0);
-            $this->Template->mapID = $mapId;
-            $heightCss = $this->Template->mapHeight ?: '400px';
-            $this->Template->mapstyle = 'height: '.$heightCss.'; width:100%';
-            // Ensure maps library is present and async loading is used (template adds callback if missing)
-            $base = 'https://maps.googleapis.com/maps/api/js?libraries=maps&loading=async&key='.rawurlencode($apiKey);
-            $this->Template->BaseScriptCode = $base;
-            $center = '51.000,10.000';
-            if ($this->Template->mapCenterEmpty) { $center = (string) $this->Template->mapCenterEmpty; }
-            $clat = 51.0; $clng = 10.0;
-            if (preg_match('~^\s*([\-\d\.]+)\s*,\s*([\-\d\.]+)\s*$~', $center, $m)) {
-                $clat = (float)$m[1]; $clng = (float)$m[2];
-            }
-            $zoom = (int) ($this->Template->mapZoomEmpty ?: 6);
-            $init = "function ".$mapId."_initialize(){var c={lat:".$clat.",lng:".$clng."};new google.maps.Map(document.getElementById('".$mapId."'),{zoom:".$zoom.",center:c});}";
-            $this->Template->GoogleMapCode = $init;
-        }
+        // Map initialization is generated after all map settings have been normalized.
 
         // Debug: add basic statistics about coords presence to help diagnose radius filtering
         $coordsCount = 0;
@@ -726,6 +724,23 @@ class MemberGoogleMapsListModule extends Module
         } catch (\Throwable $e) {}
         if ($heightVal === '' || $heightVal === 'a:0:{}') { $heightVal = '400px'; }
         $this->Template->mapHeight = $heightVal;
+        if ($includeMap && $apiKey) {
+            $mapId = 'memberlistmap_'.(int)($this->id ?? 0);
+            $this->Template->mapID = $mapId;
+            $this->Template->mapstyle = 'height: '.$heightVal.'; width:100%';
+            $this->Template->BaseScriptCode = 'https://maps.googleapis.com/maps/api/js?libraries=maps&loading=async&key='.rawurlencode($apiKey);
+
+            $center = (string) ($this->Template->mapCenterEmpty ?: '51.000,10.000');
+            $clat = 51.0;
+            $clng = 10.0;
+            if (preg_match('~^\s*([\-\d\.]+)\s*,\s*([\-\d\.]+)\s*$~', $center, $m)) {
+                $clat = (float) $m[1];
+                $clng = (float) $m[2];
+            }
+
+            $zoom = (int) ($this->Template->mapZoomEmpty ?: 6);
+            $this->Template->GoogleMapCode = "function ".$mapId."_initialize(){var c={lat:".$clat.",lng:".$clng."};new google.maps.Map(document.getElementById('".$mapId."'),{zoom:".$zoom.",center:c});}";
+        }
         // Normalize position values and provide both legacy and new variables
         $pos = (string) ($this->cm_map_poslist ?: 'bottom');
         $posNorm = strtolower($pos);
@@ -896,6 +911,9 @@ class MemberGoogleMapsListModule extends Module
 
         // Respect explicitly selected list template only; otherwise keep current $this->strTemplate
         $chosen = (string) ($this->map_lsttemplate ?? '');
+        if ($chosen === 'mod_cm_memberlist_googlemaps_tables') { $chosen = 'mod_cm_memberlist_googlemaps_tabless'; }
+        if ($chosen === 'mod_cm_memberlist_googlemaps_table')  { $chosen = 'mod_cm_memberlist_googlemaps_tabless'; }
+        if ($chosen === 'mod_cm_memberlist_googlemaps')        { $chosen = 'mod_cm_memberlist_googlemaps_tabless'; }
         if ($chosen) {
             $tpl = new FrontendTemplate($chosen);
             foreach ($this->Template->getData() as $k=>$v) { $tpl->$k = $v; }
@@ -914,10 +932,8 @@ class MemberGoogleMapsListModule extends Module
         // Pagination
         $perPage = (int) ($this->perPage ?: 0);
         if ($perPage > 0) {
-            $page = max(1, (int) (Input::get('page') ?? 1));
-            $offset = ($page - 1) * $perPage;
-            $this->Template->items = array_slice($items, $offset, $perPage);
-            $pagination = new Pagination(\count($items), $perPage);
+            $this->Template->items = $filterGroups ? array_slice($items, $offset, $perPage) : $items;
+            $pagination = new Pagination($totalItems, $perPage);
             $this->Template->pagination = $pagination->generate("\n  ");
         } else {
             $this->Template->pagination = '';
@@ -933,7 +949,8 @@ class MemberGoogleMapsListModule extends Module
         // Use dedicated lat/lng columns if present; otherwise parse from coords "lat,lng"
         $latCol = "IF(cm_membergooglemaps_lat<>'' AND cm_membergooglemaps_lat IS NOT NULL, RADIANS(cm_membergooglemaps_lat), RADIANS(CAST(SUBSTRING_INDEX(cm_membergooglemaps_coords, ',', 1) AS DECIMAL(10,6))))";
         $lngCol = "IF(cm_membergooglemaps_lng<>'' AND cm_membergooglemaps_lng IS NOT NULL, RADIANS(cm_membergooglemaps_lng), RADIANS(CAST(SUBSTRING_INDEX(cm_membergooglemaps_coords, ',', -1) AS DECIMAL(10,6))))";
-        return '6371*ACOS('.$sin.'*SIN('.$latCol.')+'.$cos.'*COS('.$latCol.')*COS('.$lngCol.'-'.$lng1.'))';
+        $acosArg = $sin.'*SIN('.$latCol.')+'.$cos.'*COS('.$latCol.')*COS('.$lngCol.'-'.$lng1.')';
+        return '6371*ACOS(LEAST(1, GREATEST(-1, '.$acosArg.')))';
     }
 
     private function geocodeVisitorLocation(): array
@@ -986,21 +1003,30 @@ class MemberGoogleMapsListModule extends Module
             'country' => $country,
         ]);
 
-        $cacheDir = dirname(__DIR__, 4).'/var/logs';
+        try {
+            $cacheDir = (string) \Contao\System::getContainer()->getParameter('kernel.cache_dir');
+        } catch (\Throwable $e) {
+            $cacheDir = dirname(__DIR__, 4).'/var/cache/prod';
+        }
         if (!is_dir($cacheDir)) { @mkdir($cacheDir, 0775, true); }
         $cacheFile = $cacheDir.'/geocode-cache.json';
         $cache = [];
         if (is_file($cacheFile)) {
             try { $cache = json_decode((string) file_get_contents($cacheFile), true) ?: []; } catch (\Throwable $e) {}
         }
-        $key = substr(sha1($url), 0, 16);
+        $key = substr(sha1((string) json_encode([
+            'location' => $location,
+            'postal' => $postal,
+            'country' => $country,
+            'components' => $components,
+        ])), 0, 16);
         if (isset($cache[$key]) && isset($cache[$key]['t']) && isset($cache[$key]['lat']) && isset($cache[$key]['lng'])) {
             if ((time() - (int)$cache[$key]['t']) < 14*24*3600) {
                 return [(float)$cache[$key]['lat'], (float)$cache[$key]['lng']];
             }
         }
 
-        $opts = ['http' => ['timeout' => 4.0]];
+        $opts = ['http' => ['timeout' => 2.0]];
         try {
             $json = @file_get_contents($url, false, stream_context_create($opts));
             if ($json === false) { return [null, null]; }
@@ -1013,8 +1039,8 @@ class MemberGoogleMapsListModule extends Module
             if (!$loc || !isset($loc['lat'], $loc['lng'])) { return [null, null]; }
             $lat = (float) $loc['lat'];
             $lng = (float) $loc['lng'];
-            $cache[$key] = ['t' => time(), 'lat' => $lat, 'lng' => $lng, 'q' => $url];
-            @file_put_contents($cacheFile, json_encode($cache));
+            $cache[$key] = ['t' => time(), 'lat' => $lat, 'lng' => $lng];
+            @file_put_contents($cacheFile, json_encode($cache, JSON_UNESCAPED_SLASHES));
             $this->dbg('geocode_response', [ 'status' => 'OK', 'lat' => $lat, 'lng' => $lng ]);
             return [$lat, $lng];
         } catch (\Throwable $e) {
@@ -1076,6 +1102,8 @@ class MemberGoogleMapsListModule extends Module
 
     private function logProbe(string $step, array $context = []): void
     {
+        if (!$this->cmDebugEnabled) { return; }
+
         try {
             $dir = '';
             try {
